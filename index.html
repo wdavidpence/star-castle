@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover,interactive-widget=overlays-content">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Star Castle</title>
+<style>
+html,body{
+  margin:0;padding:0;width:100%;height:100%;
+  overflow:hidden;overscroll-behavior:none;
+  background:#000;color:#fff;
+  font-family:"Courier New",Courier,monospace;
+  touch-action:none;user-select:none;-webkit-user-select:none;
+  position:fixed;inset:0;
+  -webkit-text-size-adjust:100%;text-size-adjust:100%;
+}
+canvas#game{
+  display:block;position:fixed;left:0;top:0;right:0;bottom:0;
+  width:100%;height:100%;background:#000;touch-action:none;
+  -webkit-touch-callout:none;
+}
+.hud{position:fixed;left:12px;top:calc(50px + env(safe-area-inset-top,0px));color:#9cf;font-size:13px;z-index:2;pointer-events:none;text-shadow:0 0 6px rgba(100,180,255,.4)}
+.hud .score{font-size:16px;font-weight:bold;color:#fff}
+.hud .lives{color:#ff9;margin-top:4px}
+.hud .level{color:#9f9;margin-top:2px}
+.btn{
+  position:fixed;z-index:5;box-sizing:border-box;
+  width:72px;height:72px;border:1px solid rgba(160,200,255,.55);border-radius:50%;
+  background:rgba(20,40,80,.32);color:#dfefff;font-weight:700;font-size:22px;
+  display:none;align-items:center;justify-content:center;
+  touch-action:none;
+  -webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none;
+  -webkit-touch-callout:none;
+  bottom:calc(18px + env(safe-area-inset-bottom,0px));
+}
+.btn:active{background:rgba(80,140,255,.38);border-color:#9cf}
+.left{left:calc(16px + env(safe-area-inset-left,0px))}
+.right{left:calc(100px + env(safe-area-inset-left,0px))}
+.fire{right:calc(16px + env(safe-area-inset-right,0px))}
+.thrust{right:calc(100px + env(safe-area-inset-right,0px))}
+@media(pointer:coarse){
+  .btn{display:flex}
+  .hud{top:calc(10px + env(safe-area-inset-top,0px))}
+  .btn{width:76px;height:76px}
+}
+@media(pointer:coarse) and (orientation:landscape){
+  .btn{width:64px;height:64px;bottom:calc(12px + env(safe-area-inset-bottom,0px))}
+  .left{left:calc(12px + env(safe-area-inset-left,0px))}
+  .right{left:calc(84px + env(safe-area-inset-left,0px))}
+  .fire{right:calc(12px + env(safe-area-inset-right,0px))}
+  .thrust{right:calc(84px + env(safe-area-inset-right,0px))}
+}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div class="hud">
+  <div class="score" id="scoreEl">SCORE: 0</div>
+  <div class="lives" id="livesEl">♥ ♥ ♥</div>
+  <div class="level" id="levelEl">LEVEL 1</div>
+</div>
+<div class="btn left" data-key="left" aria-label="rotate left">⟲</div>
+<div class="btn right" data-key="right" aria-label="rotate right">⟳</div>
+<div class="btn thrust" data-key="thrust" aria-label="thrust">▲</div>
+<div class="btn fire" data-key="fire" aria-label="fire">●</div>
+<script>
+(()=>{
+'use strict';
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+let W,H,CX,CY,SCALE;
+
+function resize(){
+  SCALE=Math.min(W/800,H/600);
+  W=canvas.width=window.innerWidth*devicePixelRatio;
+  H=canvas.height=window.innerHeight*devicePixelRatio;
+  CX=W/2;CY=H/2;
+}
+window.addEventListener('resize',resize);resize();
+
+// Input state
+const keys={left:false,right:false,thrust:false,fire:false};
+document.querySelectorAll('.btn').forEach(b=>{
+  const k=b.dataset.key;
+  b.addEventListener('touchstart',e=>{e.preventDefault();keys[k]=true},{passive:false});
+  b.addEventListener('touchend',e=>{e.preventDefault();keys[k]=false},{passive:false});
+  b.addEventListener('mousedown',()=>keys[k]=true);
+  b.addEventListener('mouseup',()=>keys[k]=false);
+});
+window.addEventListener('keydown',e=>{
+  if(e.key==='ArrowLeft'||e.key==='a')keys.left=true;
+  if(e.key==='ArrowRight'||e.key==='d')keys.right=true;
+  if(e.key==='ArrowUp'||e.key==='w')keys.thrust=true;
+  if(e.key===' ')keys.fire=true;
+});
+window.addEventListener('keyup',e=>{
+  if(e.key==='ArrowLeft'||e.key==='a')keys.left=false;
+  if(e.key==='ArrowRight'||e.key==='d')keys.right=false;
+  if(e.key==='ArrowUp'||e.key==='w')keys.thrust=false;
+  if(e.key===' ')keys.fire=false;
+});
+
+// Game state
+let score=0,lives=3,level=1,state='ready';
+let player,cannon,rings=[],mines=[],playerBullets=[],cannonBullets=[];
+let shootCooldown=0,mineTimer=0,levelTimer=0;
+
+function initLevel(){
+  player={x:CX,y:CY-120*SCALE,vx:0,vy:0,angle:-Math.PI/2,radius:12*SCALE,invincible:0};
+  cannon={x:CX,y:CY,angle:0,firing:false,fireTimer:0};
+  rings=[];
+  
+  // Three concentric rings with alternating rotation directions
+  const ringConfigs=[
+    {radius:140*SCALE,segments:12,hits:2,speed:0.008*level,dir:1,color:'#ffcc00'},
+    {radius:200*SCALE,segments:12,hits:2,speed:-0.006*level,dir:-1,color:'#ff8800'},
+    {radius:260*SCALE,segments:12,hits:2,speed:0.004*level,dir:1,color:'#ff3333'}
+  ];
+  
+  ringConfigs.forEach(cfg=>{
+    const segs=[];
+    for(let i=0;i<cfg.segments;i++){
+      segs.push({angle:i*(Math.PI*2/cfg.segments),hits:cfg.hits,maxHits:cfg.hits});
+    }
+    rings.push({...cfg,segments:segs,rotation:0});
+  });
+  
+  mines=[];
+  playerBullets=[];
+  cannonBullets=[];
+  shootCooldown=0;mineTimer=60;levelTimer=0;
+}
+
+function spawnMine(){
+  const angle=Math.random()*Math.PI*2;
+  const dist=30*SCALE+Math.random()*20*SCALE;
+  mines.push({
+    x:CX+Math.cos(angle)*dist,
+    y:CY+Math.sin(angle)*dist,
+    angle:angle,
+    speed:(1.2*level+Math.random()*0.5)*SCALE,
+    radius:6*SCALE,
+    life:600
+  });
+}
+
+function shootPlayerBullet(){
+  if(shootCooldown>0||playerBullets.length>=4)return;
+  const speed=8*SCALE;
+  playerBullets.push({
+    x:player.x+Math.cos(player.angle)*15*SCALE,
+    y:player.y+Math.sin(player.angle)*15*SCALE,
+    vx:Math.cos(player.angle)*speed+player.vx*0.3,
+    vy:Math.sin(player.angle)*speed+player.vy*0.3,
+    life:80
+  });
+  shootCooldown=12;
+}
+
+function checkCollision(x,y,radius,obj){
+  const dx=x-obj.x,dy=y-obj.y;
+  return Math.sqrt(dx*dx+dy*dy)<radius+obj.radius;
+}
+
+function update(){
+  if(state!=='playing')return;
+  
+  // Player rotation
+  const rotSpeed=0.06;
+  if(keys.left)player.angle-=rotSpeed;
+  if(keys.right)player.angle+=rotSpeed;
+  
+  // Thrust
+  if(keys.thrust){
+    player.vx+=Math.cos(player.angle)*0.15*SCALE;
+    player.vy+=Math.sin(player.angle)*0.15*SCALE;
+  }
+  
+  // Friction
+  player.vx*=0.98;player.vy*=0.98;
+  
+  // Move player
+  player.x+=player.vx;player.y+=player.vy;
+  
+  // Wrap around screen edges
+  if(player.x<0)player.x=W;if(player.x>W)player.x=0;
+  if(player.y<0)player.y=H;if(player.y>H)player.y=0;
+  
+  // Invincibility timer
+  if(player.invincible>0)player.invincible--;
+  
+  // Shooting
+  if(keys.fire)shootPlayerBullet();
+  if(shootCooldown>0)shootCooldown--;
+  
+  // Update player bullets
+  playerBullets.forEach(b=>{b.x+=b.vx;b.y+=b.vy;b.life--;});
+  playerBullets=playerBullets.filter(b=>b.life>0&&b.x>0&&b.x<W&&b.y>0&&b.y<H);
+  
+  // Update cannon (tracks player)
+  const dx=player.x-cannon.x,dy=player.y-cannon.y;
+  cannon.angle=Math.atan2(dy,dx);
+  
+  // Cannon fires when there's a gap in shields (any ring has destroyed segments)
+  const hasGap=rings.some(r=>r.segments.some(s=>s.hits===0));
+  if(hasGap){
+    cannon.fireTimer++;
+    if(cannon.fireTimer>40){
+      // Fire a powerful bullet toward player
+      const dist=Math.sqrt(dx*dx+dy*dy)||1;
+      const speed=5*SCALE;
+      cannonBullets.push({x:cannon.x,y:cannon.y,vx:dx/dist*speed,vy:dy/dist*speed,life:120});
+      cannon.fireTimer=0;
+    }
+  }else{cannon.fireTimer=0;}
+  
+  // Update cannon bullets
+  cannonBullets.forEach(b=>{b.x+=b.vx;b.y+=b.vy;b.life--;});
+  cannonBullets=cannonBullets.filter(b=>b.life>0);
+  
+  // Update rings (rotation)
+  rings.forEach(r=>{
+    r.rotation+=r.speed*r.dir;
+    r.segments.forEach(s=>s.angle+=r.speed*r.dir);
+  });
+  
+  // Spawn mines periodically
+  mineTimer--;
+  if(mineTimer<=0&&mines.length<3+level){
+    spawnMine();
+    mineTimer=Math.max(60,180-level*20);
+  }
+  
+  // Update mines (homing toward player)
+  mines.forEach(m=>{
+    const dx=player.x-m.x,dy=player.y-m.y;
+    const dist=Math.sqrt(dx*dx+dy*dy)||1;
+    m.vx=dx/dist*m.speed;m.vy=dy/dist*m.speed;
+    m.x+=m.vx;m.y+=m.vy;
+    m.life--;
+  });
+  mines=mines.filter(m=>m.life>0&&m.x>-50*SCALE&&m.x<W+50*SCALE&&m.y>-50*SCALE&&m.y<H+50*SCALE);
+  
+  // Collision: player bullets vs ring segments
+  playerBullets.forEach(b=>{
+    rings.forEach(r=>{
+      r.segments.forEach(s=>{
+        if(s.hits>0){
+          const segAngle=s.angle+r.rotation;
+          const bx=CX+Math.cos(segAngle)*r.radius;
+          const by=CY+Math.sin(segAngle)*r.radius;
+          if(Math.sqrt((b.x-bx)**2+(b.y-by)**2)<15*SCALE){
+            s.hits--;
+            b.life=0;
+            if(s.hits===0)score+=10*level;
+          }
+        }
+      });
+    });
+  });
+  
+  // Check if any complete ring is destroyed (regeneration mechanic)
+  rings.forEach((r,idx)=>{
+    if(r.segments.every(s=>s.hits===0)&&idx<2){
+      // This ring is completely destroyed, shift inner rings outward
+      const nextRing=rings[idx+1];
+      r.radius=nextRing.radius;
+      r.segments.forEach((s,i)=>{
+        s.angle=i*(Math.PI*2/r.segments.length);
+        s.hits=s.maxHits;
+      });
+      r.speed=nextRing.speed*0.8; // Slow down slightly
+    }
+  });
+  
+  // Collision: player bullets vs cannon (only if inner ring breached)
+  const innerRingBreached=rings[0].segments.every(s=>s.hits===0);
+  if(innerRingBreached){
+    playerBullets.forEach(b=>{
+      if(Math.sqrt((b.x-cannon.x)**2+(b.y-cannon.y)**2)<20*SCALE){
+        b.life=0;score+=100*level;state='levelComplete';levelTimer=90;
+      }
+    });
+  }
+  
+  // Collision: mines vs player
+  if(player.invincible===0){
+    mines.forEach(m=>{
+      if(checkCollision(player.x,player.y,player.radius,m)){
+        playerHit();
+      }
+    });
+  }
+  
+  // Collision: cannon bullets vs player
+  if(player.invincible===0){
+    cannonBullets.forEach(b=>{
+      if(checkCollision(player.x,player.y,player.radius,b)){
+        playerHit();b.life=0;
+      }
+    });
+  }
+  
+  // Cleanup dead bullets
+  playerBullets=playerBullets.filter(b=>b.life>0);
+  cannonBullets=cannonBullets.filter(b=>b.life>0);
+  
+  // Level complete transition
+  if(state==='levelComplete'){
+    levelTimer--;
+    if(levelTimer===0){
+      level++;initLevel();state='playing';
+    }
+  }
+  
+  // Update HUD
+  document.getElementById('scoreEl').textContent='SCORE: '+score;
+  let hearts='';for(let i=0;i<lives;i++)hearts+='♥ ';
+  document.getElementById('livesEl').textContent=hearts;
+  document.getElementById('levelEl').textContent='LEVEL '+level;
+}
+
+function playerHit(){
+  lives--;player.invincible=120;
+  if(lives<=0)state='gameover';
+}
+
+function draw(){
+  ctx.fillStyle='#000';ctx.fillRect(0,0,W,H);
+  
+  // Stars background
+  ctx.fillStyle='rgba(255,255,255,0.3)';
+  for(let i=0;i<50;i++){
+    const x=(i*137.5)%W,y=(i*243.7)%H;
+    ctx.fillRect(x,y,1*SCALE,1*SCALE);
+  }
+  
+  if(state==='ready'){
+    ctx.fillStyle='#fff';ctx.font='bold '+28*SCALE+'px Courier New';
+    ctx.textAlign='center';ctx.fillText('STAR CASTLE',CX,CY-40*SCALE);
+    ctx.font='16px Courier New';ctx.fillStyle='#9cf';
+    ctx.fillText('Destroy the cannon!',CX,CY+10*SCALE);
+    ctx.fillText('Tap to start',CX,CY+40*SCALE);
+    return;
+  }
+  
+  // Draw rings (vector style with glow)
+  ctx.shadowBlur=10*SCALE;ctx.shadowColor='rgba(255,255,255,0.5)';
+  rings.forEach(r=>{
+    ctx.strokeStyle=r.color;ctx.lineWidth=2*SCALE;
+    r.segments.forEach(s=>{
+      if(s.hits>0){
+        const a=s.angle+r.rotation;
+        ctx.beginPath();
+        ctx.arc(CX,CY,r.radius,a-0.25,a+0.25);
+        ctx.stroke();
+      }
+    });
+  });
+  ctx.shadowBlur=0;
+  
+  // Draw cannon (center) with glow
+  ctx.save();ctx.translate(cannon.x,cannon.y);ctx.rotate(cannon.angle);
+  ctx.shadowBlur=8*SCALE;ctx.shadowColor='rgba(255,255,255,0.7)';
+  ctx.strokeStyle='#fff';ctx.lineWidth=3*SCALE;
+  // Cannon barrel
+  ctx.beginPath();ctx.moveTo(-8*SCALE,0);ctx.lineTo(18*SCALE,0);ctx.stroke();
+  // Cannon base
+  ctx.beginPath();ctx.arc(0,0,12*SCALE,0,Math.PI*2);ctx.stroke();
+  ctx.restore();
+  ctx.shadowBlur=0;
+  
+  // Draw mines (homing missiles) with glow
+  ctx.shadowBlur=6*SCALE;ctx.shadowColor='rgba(255,255,0,0.8)';
+  ctx.fillStyle='#ff0';
+  mines.forEach(m=>{
+    ctx.beginPath();ctx.arc(m.x,m.y,m.radius,0,Math.PI*2);ctx.fill();
+  });
+  ctx.shadowBlur=0;
+  
+  // Draw player bullets (vector lines with glow)
+  ctx.shadowBlur=6*SCALE;ctx.shadowColor='rgba(0,255,255,0.8)';
+  ctx.strokeStyle='#0ff';ctx.lineWidth=2*SCALE;
+  playerBullets.forEach(b=>{
+    ctx.beginPath();ctx.moveTo(b.x,b.y);
+    ctx.lineTo(b.x-b.vx*0.5,b.y-b.vy*0.5);ctx.stroke();
+  });
+  ctx.shadowBlur=0;
+  
+  // Draw cannon bullets (explosive with glow)
+  ctx.shadowBlur=8*SCALE;ctx.shadowColor='rgba(255,136,0,0.9)';
+  ctx.strokeStyle='#f80';ctx.lineWidth=3*SCALE;
+  cannonBullets.forEach(b=>{
+    ctx.beginPath();ctx.arc(b.x,b.y,4*SCALE,0,Math.PI*2);ctx.fill();
+  });
+  ctx.shadowBlur=0;
+  
+  // Draw player ship (vector style with glow)
+  if(player.invincible===0||Math.floor(Date.now()/100)%2===0){
+    ctx.save();ctx.translate(player.x,player.y);ctx.rotate(player.angle);
+    ctx.shadowBlur=8*SCALE;ctx.shadowColor='rgba(0,255,255,0.7)';
+    ctx.strokeStyle='#0ff';ctx.lineWidth=2*SCALE;
+    // Ship body
+    ctx.beginPath();
+    ctx.moveTo(12*SCALE,0);ctx.lineTo(-8*SCALE,-7*SCALE);
+    ctx.lineTo(-4*SCALE,0);ctx.lineTo(-8*SCALE,7*SCALE);
+    ctx.closePath();ctx.stroke();
+    // Thrust flame
+    if(keys.thrust){
+      ctx.strokeStyle='#f80';ctx.lineWidth=2*SCALE;
+      ctx.beginPath();ctx.moveTo(-6*SCALE,-4*SCALE);
+      ctx.lineTo(-12*SCALE,0);ctx.lineTo(-6*SCALE,4*SCALE);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  ctx.shadowBlur=0;
+  
+  // Level complete text
+  if(state==='levelComplete'){
+    ctx.fillStyle='#0f0';ctx.font='bold '+24*SCALE+'px Courier New';
+    ctx.textAlign='center';ctx.fillText('LEVEL '+level+' COMPLETE',CX,CY);
+  }
+  
+  // Game over screen
+  if(state==='gameover'){
+    ctx.fillStyle='#f00';ctx.font='bold '+32*SCALE+'px Courier New';
+    ctx.textAlign='center';ctx.fillText('GAME OVER',CX,CY-20*SCALE);
+    ctx.fillStyle='#fff';ctx.font='16px Courier New';
+    ctx.fillText('Score: '+score,CX,CY+20*SCALE);
+    ctx.fillText('Tap to restart',CX,CY+50*SCALE);
+  }
+}
+
+// Start/restart on tap/click
+canvas.addEventListener('touchstart',()=>{
+  if(state==='ready'||state==='gameover'){initLevel();state='playing';}
+},{passive:true});
+canvas.addEventListener('mousedown',()=>{
+  if(state==='ready'||state==='gameover'){initLevel();state='playing';}
+});
+
+function loop(){update();draw();requestAnimationFrame(loop);}
+initLevel();state='ready';loop();
+})();
+</script>
+</body>
+</html>
