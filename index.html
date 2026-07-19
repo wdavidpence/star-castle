@@ -1,54 +1,39 @@
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+<html>
 <head>
-<meta charset="utf-8">
-<title>Star Castle</title>
-<style>
-body{margin:0;background:#000;color:#fff;font-family:'Courier New',monospace;overflow:hidden}
-canvas{display:block;width:100vw;height:100vh}
-#startBtn{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);padding:20px 40px;font-size:28px;background:#000;border:3px solid #ff0;color:#ff0;cursor:pointer;font-family:'Courier New',monospace;text-transform:uppercase;z-index:10}
-#startBtn:hover{background:#1a1a00;box-shadow:0 0 20px #ff0}
-</style>
+    <title>Star Castle</title>
+    <style>
+        body { margin: 0; background: black; color: white; font-family: monospace; }
+        #game { width: 100vw; height: 100vh; }
+        #startBtn { 
+            position: absolute; 
+            top: 50%; 
+            left: 50%; 
+            transform: translate(-50%, -50%);
+            padding: 20px; 
+            font-size: 24px; 
+            background: black; 
+            color: yellow;
+            border: 2px solid yellow;
+            cursor: pointer;
+        }
+    </style>
 </head>
 <body>
-<canvas id="game"></canvas>
-<button id="startBtn">INSERT COIN</button>
-<script>
-const canvas=document.getElementById('game');
-const ctx=canvas.getContext('2d');
-let W,H;
-
-function resize(){W=canvas.width=window.innerWidth;H=canvas.height=window.innerHeight;}
-resize();
-
-let gameState='attract';
-
-function startGame(){
-  gameState='playing';
-  document.getElementById('startBtn').style.display='none';
-}
-
-document.getElementById('startBtn').addEventListener('click',()=>{
-  startGame();
-});
-
-function loop(){
-  ctx.fillStyle='#000';
-  ctx.fillRect(0,0,W,H);
-  
-  if(gameState==='attract'){
-    ctx.fillStyle='#ff0';
-    ctx.font='bold 48px monospace';
-    ctx.textAlign='center';
-    ctx.fillText('STAR CASTLE',W/2,H/3);
-  }else{
-    ctx.fillStyle='#0f0';
-    ctx.font='24px monospace';
-    ctx.textAlign='center';
-    ctx.fillText('GAME RUNNING',W/2,H/2);
-  }
-  
-  requestAnimationFrame(loop);
-}
-
-loop();
+    <div id="game"></div>
+    <button id="startBtn">START GAME</button>
+    
+    <script>
+        const gameDiv = document.getElementById('game');
+        let gameState = 'attract';
+        
+        function startGame() {
+            gameState = 'playing';
+            document.getElementById('startBtn').style.display = 'none';
+            gameDiv.innerHTML = '<h1 style="text-align:center;margin-top:20%">GAME RUNNING</h1>';
+        }
+        
+        document.getElementById('startBtn').onclick = startGame;
+    </script>
+</body>
+</html>
