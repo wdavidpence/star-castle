@@ -51,7 +51,7 @@ let regenTimer=0;
 const keys={};
 const touchInput={left:false,right:false,fire:false,thrust:false};
 
-// Initialize rings with proper positions
+// Initialize rings with proper positions (tighter around cannon)
 function initRings(){
   rings=[];
   const centerX=W/2, centerY=H/3;
@@ -59,10 +59,10 @@ function initRings(){
     const ring={
       x:centerX,
       y:centerY,
-      radius:120+i*50,
+      radius:60+i*35,  // Reduced from 120 to 60, spacing reduced
       segments:[],
       rotation:Math.random()*Math.PI*2,
-      speed:(i%2===0?1:-1)*(0.008+level*0.002)
+      speed:(i%2===0?1:-1)*(0.01+level*0.003)
     };
     for(let j=0;j<12;j++){
       ring.segments.push({angle:j*(Math.PI*2/12),hits:2});
@@ -127,37 +127,42 @@ function createExplosion(x,y,color,count){
 function update(){
   if(state!=='playing')return;
   
-  // Player rotation (keyboard)
-  if(keys['ArrowLeft']||keys['a'])player.angle-=0.06;
-  if(keys['ArrowRight']||keys['d'])player.angle+=0.06;
+  // Player rotation (keyboard) - Asteroids style
+  if(keys['ArrowLeft']||keys['a'])player.angle-=0.08;
+  if(keys['ArrowRight']||keys['d'])player.angle+=0.08;
   
-  // Player thrust (keyboard)
+  // Player thrust (keyboard) - Asteroids style with inertia
   if(keys['ArrowUp']||keys['w']){
-    player.vx+=Math.cos(player.angle)*0.15;
-    player.vy+=Math.sin(player.angle)*0.15;
+    player.vx+=Math.cos(player.angle)*0.18;
+    player.vy+=Math.sin(player.angle)*0.18;
   }
   
-  // Touch controls
-  if(touchInput.left)player.angle-=0.05;
-  if(touchInput.right)player.angle+=0.05;
-  if(touchInput.thrust){
-    player.vx+=Math.cos(player.angle)*0.12;
-    player.vy+=Math.sin(player.angle)*0.12;
+  // Touch joystick controls - full movement
+  if(touchJoystick.active){
+    const angle=Math.atan2(touchJoystick.dy,touchJoystick.dx);
+    player.angle=angle;
+    
+    const dist=Math.sqrt(touchJoystick.dx*touchJoystick.dx+touchJoystick.dy*touchJoystick.dy);
+    if(dist>15){
+      const thrust=Math.min(dist/60,1)*0.25;
+      player.vx+=Math.cos(angle)*thrust;
+      player.vy+=Math.sin(angle)*thrust;
+    }
   }
   
-  // Apply friction/drag
-  player.vx*=0.98;
-  player.vy*=0.98;
+  // Apply friction/drag (less than Asteroids for better control)
+  player.vx*=0.97;
+  player.vy*=0.97;
   
   // Update player position
   player.x+=player.vx;
   player.y+=player.vy;
   
-  // Wrap around screen edges
-  if(player.x<0)player.x=W;
-  if(player.x>W)player.x=0;
-  if(player.y<0)player.y=H;
-  if(player.y>H)player.y=0;
+  // Wrap around screen edges (Asteroids style)
+  if(player.x<-20)player.x=W+20;
+  if(player.x>W+20)player.x=-20;
+  if(player.y<-20)player.y=H+20;
+  if(player.y>H+20)player.y=-20;
   
   // Update bullets
   bullets.forEach(b=>{b.x+=b.vx;b.y+=b.vy;b.life--;});
@@ -521,8 +526,10 @@ window.addEventListener('keydown',e=>{
 });
 window.addEventListener('keyup',e=>{keys[e.key]=false;});
 
-// Touch controls for mobile
-let touchStartX=0,touchStartY=0;
+// Touch controls for mobile - joystick style
+let touchJoystick={active:false,x:0,y:0,dx:0,dy:0};
+let touchFire={active:false,x:0,y:0};
+
 canvas.addEventListener('touchstart',e=>{
   e.preventDefault();
   if(state==='attract'||state==='ready'){
@@ -534,36 +541,53 @@ canvas.addEventListener('touchstart',e=>{
     return;
   }
   
-  touchStartX=e.touches[0].clientX;
-  touchStartY=e.touches[0].clientY;
-  
-  // Determine which side of screen was touched
-  if(touchStartX<W/2){
-    touchInput.left=true;
-  }else{
-    touchInput.right=true;
+  for(let i=0;i<e.touches.length;i++){
+    const touch=e.touches[i];
+    
+    // Left half: joystick for movement
+    if(touch.clientX<W/2&&!touchJoystick.active){
+      touchJoystick={active:true,x:touch.clientX,y:touch.clientY,dx:0,dy:0};
+    }
+    
+    // Right half: fire button
+    if(touch.clientX>=W/2&&!touchFire.active){
+      touchFire={active:true,x:touch.clientX,y:touch.clientY};
+    }
   }
-  
-  // Tap to fire/thrust
-  touchInput.fire=true;
 },{passive:false});
 
 canvas.addEventListener('touchmove',e=>{
   e.preventDefault();
   if(state!=='playing')return;
   
-  const touchX=e.touches[0].clientX;
-  const touchY=e.touches[0].clientY;
-  
-  // Update thrust based on touch position relative to start
-  if(touchStartX<W/2){
-    // Left side: rotation only
-    touchInput.left=true;
-    touchInput.right=false;
-  }else{
-    // Right side: thrust only
-    touchInput.left=false;
-    touchInput.right=true;
+  for(let i=0;i<e.touches.length;i++){
+    const touch=e.touches[i];
+    
+    // Update joystick position
+    if(touchJoystick.active&&touch.clientX<W/2){
+      const dx=touch.clientX-touchJoystick.x;
+      const dy=touch.clientY-touchJoystick.y;
+      const dist=Math.sqrt(dx*dx+dy*dy);
+      const maxDist=50;
+      
+      if(dist>maxDist){
+        touchJoystick.dx=(dx/dist)*maxDist;
+        touchJoystick.dy=(dy/dist)*maxDist;
+      }else{
+        touchJoystick.dx=dx;
+        touchJoystick.dy=dy;
+      }
+      
+      // Convert joystick to ship rotation and thrust
+      const angle=Math.atan2(touchJoystick.dy,touchJoystick.dx);
+      player.angle=angle;
+      
+      if(dist>10){
+        const thrust=Math.min(dist/50,1)*0.2;
+        player.vx+=Math.cos(angle)*thrust;
+        player.vy+=Math.sin(angle)*thrust;
+      }
+    }
   }
 },{passive:false});
 
@@ -571,16 +595,79 @@ canvas.addEventListener('touchend',e=>{
   e.preventDefault();
   if(state!=='playing')return;
   
-  // Fire on release
-  if(touchInput.fire){
-    shoot();
+  for(let i=0;i<e.changedTouches.length;i++){
+    const touch=e.changedTouches[i];
+    
+    // Release joystick
+    if(touch.clientX<W/2){
+      touchJoystick={active:false,x:0,y:0,dx:0,dy:0};
+    }
+    
+    // Release fire button
+    if(touch.clientX>=W/2){
+      touchFire={active:false,x:0,y:0};
+    }
+  }
+},{passive:false});
+
+// Draw touch controls overlay
+function drawTouchControls(){
+  if(state!=='playing')return;
+  
+  // Left joystick area (transparent)
+  ctx.strokeStyle='rgba(255,255,255,0.1)';
+  ctx.lineWidth=2;
+  ctx.beginPath();
+  ctx.arc(W/4,H*0.75,60,0,Math.PI*2);
+  ctx.stroke();
+  
+  // Joystick indicator
+  if(touchJoystick.active){
+    const jx=W/4+touchJoystick.dx;
+    const jy=H*0.75+touchJoystick.dy;
+    ctx.fillStyle='rgba(0,255,0,0.3)';
+    ctx.beginPath();
+    ctx.arc(jx,jy,20,0,Math.PI*2);
+    ctx.fill();
+  }else{
+    ctx.fillStyle='rgba(0,255,0,0.2)';
+    ctx.beginPath();
+    ctx.arc(W/4,H*0.75,20,0,Math.PI*2);
+    ctx.fill();
   }
   
-  touchInput.left=false;
-  touchInput.right=false;
-  touchInput.fire=false;
-  touchInput.thrust=false;
-},{passive:false});
+  // Right fire button (transparent)
+  ctx.strokeStyle='rgba(255,0,0,0.1)';
+  ctx.lineWidth=2;
+  ctx.beginPath();
+  ctx.arc(W*0.75,H*0.75,50,0,Math.PI*2);
+  ctx.stroke();
+  
+  // Fire button indicator
+  if(touchFire.active){
+    ctx.fillStyle='rgba(255,0,0,0.4)';
+  }else{
+    ctx.fillStyle='rgba(255,0,0,0.2)';
+  }
+  ctx.beginPath();
+  ctx.arc(W*0.75,H*0.75,40,0,Math.PI*2);
+  ctx.fill();
+  
+  // Labels
+  ctx.fillStyle='rgba(255,255,255,0.3)';
+  ctx.font='14px monospace';
+  ctx.textAlign='center';
+  ctx.fillText('MOVE',W/4,H*0.75+80);
+  ctx.fillText('FIRE',W*0.75,H*0.75+65);
+}
+
+// Game loop
+function loop(){
+  update();
+  draw();
+  drawTouchControls();
+  requestAnimationFrame(loop);
+}
 
 // Start/restart game
 function startGame(){
@@ -614,6 +701,3 @@ player.y=H-100;
 
 // Start loop
 loop();
-</script>
-</body>
-</html>
