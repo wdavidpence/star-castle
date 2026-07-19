@@ -485,11 +485,20 @@ function draw(){
 
 // Start/restart on tap/click
 document.getElementById('startInstruction').addEventListener('click',()=>{
-  if(state==='ready'||state==='gameover'){initLevel();state='playing';}
+  console.log('Start button clicked, current state:', state);
+  if(state==='ready'||state==='gameover'){
+    console.log('Starting game...');
+    initLevel();
+    state='playing';
+  }
 });
 document.getElementById('startInstruction').addEventListener('touchend',e=>{
   e.preventDefault();
-  if(state==='ready'||state==='gameover'){initLevel();state='playing';}
+  console.log('Touch start triggered');
+  if(state==='ready'||state==='gameover'){
+    initLevel();
+    state='playing';
+  }
 },{passive:false});
 
 canvas.addEventListener('touchstart',()=>{
@@ -502,7 +511,9 @@ canvas.addEventListener('mousedown',()=>{
 // Hide start instruction when game starts
 const origInitLevel = initLevel;
 initLevel = function(){
-  document.getElementById('startInstruction').style.display='none';
+  if(state==='playing'){
+    document.getElementById('startInstruction').style.display='none';
+  }
   origInitLevel();
 };
 
