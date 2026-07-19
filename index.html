@@ -526,9 +526,8 @@ window.addEventListener('keydown',e=>{
 });
 window.addEventListener('keyup',e=>{keys[e.key]=false;});
 
-// Touch controls for mobile - joystick style
-let touchJoystick={active:false,x:0,y:0,dx:0,dy:0};
-let touchFire={active:false,x:0,y:0};
+// Touch controls for mobile - simple Asteroids style
+let touchControls={left:false,right:false,thrust:false,fire:false};
 
 canvas.addEventListener('touchstart',e=>{
   e.preventDefault();
@@ -544,121 +543,121 @@ canvas.addEventListener('touchstart',e=>{
   for(let i=0;i<e.touches.length;i++){
     const touch=e.touches[i];
     
-    // Left half: joystick for movement
-    if(touch.clientX<W/2&&!touchJoystick.active){
-      touchJoystick={active:true,x:touch.clientX,y:touch.clientY,dx:0,dy:0};
+    // Left side: rotate left
+    if(touch.clientX<W/3){
+      touchControls.left=true;
     }
     
-    // Right half: fire button
-    if(touch.clientX>=W/2&&!touchFire.active){
-      touchFire={active:true,x:touch.clientX,y:touch.clientY};
+    // Right side: rotate right + thrust + fire
+    if(touch.clientX>W*2/3){
+      touchControls.right=true;
+      touchControls.thrust=true;
+      touchControls.fire=true;
+    }
+    
+    // Center: thrust + fire
+    if(touch.clientX>=W/3&&touch.clientX<=W*2/3){
+      touchControls.thrust=true;
+      touchControls.fire=true;
     }
   }
 },{passive:false});
 
 canvas.addEventListener('touchmove',e=>{
   e.preventDefault();
-  if(state!=='playing')return;
-  
-  for(let i=0;i<e.touches.length;i++){
-    const touch=e.touches[i];
-    
-    // Update joystick position
-    if(touchJoystick.active&&touch.clientX<W/2){
-      const dx=touch.clientX-touchJoystick.x;
-      const dy=touch.clientY-touchJoystick.y;
-      const dist=Math.sqrt(dx*dx+dy*dy);
-      const maxDist=50;
-      
-      if(dist>maxDist){
-        touchJoystick.dx=(dx/dist)*maxDist;
-        touchJoystick.dy=(dy/dist)*maxDist;
-      }else{
-        touchJoystick.dx=dx;
-        touchJoystick.dy=dy;
-      }
-      
-      // Convert joystick to ship rotation and thrust
-      const angle=Math.atan2(touchJoystick.dy,touchJoystick.dx);
-      player.angle=angle;
-      
-      if(dist>10){
-        const thrust=Math.min(dist/50,1)*0.2;
-        player.vx+=Math.cos(angle)*thrust;
-        player.vy+=Math.sin(angle)*thrust;
-      }
-    }
-  }
 },{passive:false});
 
 canvas.addEventListener('touchend',e=>{
   e.preventDefault();
   if(state!=='playing')return;
   
-  for(let i=0;i<e.changedTouches.length;i++){
-    const touch=e.changedTouches[i];
+  // Reset all controls on touch end
+  touchControls={left:false,right:false,thrust:false,fire:false};
+  
+  // Re-check remaining touches
+  for(let i=0;i<e.touches.length;i++){
+    const touch=e.touches[i];
     
-    // Release joystick
-    if(touch.clientX<W/2){
-      touchJoystick={active:false,x:0,y:0,dx:0,dy:0};
+    if(touch.clientX<W/3){
+      touchControls.left=true;
     }
     
-    // Release fire button
-    if(touch.clientX>=W/2){
-      touchFire={active:false,x:0,y:0};
+    if(touch.clientX>W*2/3){
+      touchControls.right=true;
+      touchControls.thrust=true;
+    }
+    
+    if(touch.clientX>=W/3&&touch.clientX<=W*2/3){
+      touchControls.thrust=true;
     }
   }
 },{passive:false});
 
-// Draw touch controls overlay
+// Draw touch controls overlay (Asteroids style)
 function drawTouchControls(){
   if(state!=='playing')return;
   
-  // Left joystick area (transparent)
-  ctx.strokeStyle='rgba(255,255,255,0.1)';
-  ctx.lineWidth=2;
-  ctx.beginPath();
-  ctx.arc(W/4,H*0.75,60,0,Math.PI*2);
-  ctx.stroke();
+  // Left rotate button (large area)
+  ctx.fillStyle='rgba(255,255,255,0.05)';
+  ctx.fillRect(0,H*0.6,W/3,H*0.4);
   
-  // Joystick indicator
-  if(touchJoystick.active){
-    const jx=W/4+touchJoystick.dx;
-    const jy=H*0.75+touchJoystick.dy;
-    ctx.fillStyle='rgba(0,255,0,0.3)';
-    ctx.beginPath();
-    ctx.arc(jx,jy,20,0,Math.PI*2);
-    ctx.fill();
-  }else{
-    ctx.fillStyle='rgba(0,255,0,0.2)';
-    ctx.beginPath();
-    ctx.arc(W/4,H*0.75,20,0,Math.PI*2);
-    ctx.fill();
-  }
+  // Right rotate button (large area)
+  ctx.fillStyle='rgba(255,255,255,0.05)';
+  ctx.fillRect(W*2/3,H*0.6,W/3,H*0.4);
   
-  // Right fire button (transparent)
-  ctx.strokeStyle='rgba(255,0,0,0.1)';
-  ctx.lineWidth=2;
-  ctx.beginPath();
-  ctx.arc(W*0.75,H*0.75,50,0,Math.PI*2);
-  ctx.stroke();
-  
-  // Fire button indicator
-  if(touchFire.active){
-    ctx.fillStyle='rgba(255,0,0,0.4)';
-  }else{
-    ctx.fillStyle='rgba(255,0,0,0.2)';
-  }
-  ctx.beginPath();
-  ctx.arc(W*0.75,H*0.75,40,0,Math.PI*2);
-  ctx.fill();
+  // Center thrust button (large area)
+  ctx.fillStyle='rgba(255,255,255,0.08)';
+  ctx.fillRect(W/3,H*0.6,W/3,H*0.4);
   
   // Labels
-  ctx.fillStyle='rgba(255,255,255,0.3)';
-  ctx.font='14px monospace';
+  ctx.fillStyle='rgba(255,255,255,0.4)';
+  ctx.font='bold 16px monospace';
   ctx.textAlign='center';
-  ctx.fillText('MOVE',W/4,H*0.75+80);
-  ctx.fillText('FIRE',W*0.75,H*0.75+65);
+  
+  // Left arrow
+  ctx.fillText('◀',W/6,H*0.75);
+  
+  // Right arrow
+  ctx.fillText('▶',W*5/6,H*0.75);
+  
+  // Center thrust indicator
+  if(touchControls.thrust){
+    ctx.fillStyle='rgba(0,255,0,0.3)';
+    ctx.beginPath();
+    ctx.moveTo(W/2,H*0.65);
+    ctx.lineTo(W/2-15,H*0.85);
+    ctx.lineTo(W/2+15,H*0.85);
+    ctx.closePath();
+    ctx.fill();
+  }else{
+    ctx.strokeStyle='rgba(0,255,0,0.4)';
+    ctx.lineWidth=2;
+    ctx.beginPath();
+    ctx.moveTo(W/2,H*0.65);
+    ctx.lineTo(W/2-15,H*0.85);
+    ctx.lineTo(W/2+15,H*0.85);
+    ctx.closePath();
+    ctx.stroke();
+  }
+  
+  // Fire indicator (top right)
+  if(touchControls.fire){
+    ctx.fillStyle='rgba(255,0,0,0.4)';
+    ctx.beginPath();
+    ctx.arc(W*0.85,H*0.15,25,0,Math.PI*2);
+    ctx.fill();
+  }else{
+    ctx.strokeStyle='rgba(255,0,0,0.4)';
+    ctx.lineWidth=2;
+    ctx.beginPath();
+    ctx.arc(W*0.85,H*0.15,25,0,Math.PI*2);
+    ctx.stroke();
+  }
+  
+  // Fire label
+  ctx.fillStyle='rgba(255,255,255,0.4)';
+  ctx.font='12px monospace';
+  ctx.fillText('FIRE',W*0.85,H*0.15+4);
 }
 
 // Game loop
