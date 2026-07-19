@@ -103,8 +103,8 @@ function update(){
   cannonBullets.forEach(b=>{b.x+=b.vx;b.y+=b.vy;});
   cannonBullets=cannonBullets.filter(b=>b.x>0&&b.x<W&&b.y>0&&b.y<H);
   
-  // Update mines
-  if(Math.random()<0.02)spawnMine();
+  // Update mines (spawn rate reduced from 0.02 to 0.005)
+  if(Math.random()<0.005 && mines.length<10)spawnMine();
   mines.forEach(m=>{m.y+=m.vy;m.x+=m.vx;});
   mines=mines.filter(m=>m.y<H+50);
   
