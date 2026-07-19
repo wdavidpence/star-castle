@@ -22,10 +22,6 @@ canvas#game{
   width:100%;height:100%;background:#000;touch-action:none;
   -webkit-touch-callout:none;
 }
-.hud{position:fixed;left:12px;top:calc(50px + env(safe-area-inset-top,0px));color:#9cf;font-size:13px;z-index:2;pointer-events:none;text-shadow:0 0 6px rgba(100,180,255,.4)}
-.hud .score{font-size:16px;font-weight:bold;color:#fff}
-.hud .lives{color:#ff9;margin-top:4px}
-.hud .level{color:#9f9;margin-top:2px}
 .btn{
   position:fixed;z-index:5;box-sizing:border-box;
   width:72px;height:72px;border:1px solid rgba(160,200,255,.55);border-radius:50%;
@@ -36,51 +32,37 @@ canvas#game{
   -webkit-touch-callout:none;
   bottom:calc(18px + env(safe-area-inset-bottom,0px));
 }
-.btn:active{background:rgba(80,140,255,.38);border-color:#9cf}
-.start-btn{
+.start-btn:active{background:rgba(80,140,255,.6);border-color:#fff}
+.start-instruction{
   position:fixed;z-index:10;box-sizing:border-box;
   padding:24px 32px;border:2px solid rgba(160,200,255,.8);border-radius:12px;
   background:rgba(20,40,80,.6);color:#fff;font-weight:bold;font-size:18px;
   font-family:"Courier New",monospace;text-transform:uppercase;letter-spacing:2px;
-  cursor:pointer;display:none;align-items:center;justify-content:center;
+  cursor:pointer;display:flex;align-items:center;justify-content:center;
   touch-action:manipulation;-webkit-tap-highlight-color:transparent;user-select:none;
   -webkit-user-select:none;text-shadow:0 0 10px rgba(160,200,255,.8);
   box-shadow:0 0 20px rgba(160,200,255,.4);
   bottom:calc(30% + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);
 }
-.start-btn:active{background:rgba(80,140,255,.6);border-color:#fff}
-@media(pointer:coarse){.start-btn{display:flex}}
+.start-instruction:active{background:rgba(80,140,255,.6);border-color:#fff}
 .left{left:calc(16px + env(safe-area-inset-left,0px))}
 .right{left:calc(100px + env(safe-area-inset-left,0px))}
 .fire{right:calc(16px + env(safe-area-inset-right,0px))}
 .thrust{right:calc(100px + env(safe-area-inset-right,0px))}
 @media(pointer:coarse){
   .btn{display:flex}
-  .hud{top:calc(10px + env(safe-area-inset-top,0px))}
   .btn{width:76px;height:76px}
-}
-@media(pointer:coarse) and (orientation:landscape){
-  .btn{width:64px;height:64px;bottom:calc(12px + env(safe-area-inset-bottom,0px))}
-  .left{left:calc(12px + env(safe-area-inset-left,0px))}
-  .right{left:calc(84px + env(safe-area-inset-left,0px))}
-  .fire{right:calc(12px + env(safe-area-inset-right,0px))}
-  .thrust{right:calc(84px + env(safe-area-inset-right,0px))}
 }
 </style>
 </head>
 <body>
 <canvas id="game"></canvas>
-<div class="hud">
-  <div class="score" id="scoreEl">SCORE: 0</div>
-  <div class="lives" id="livesEl">♥ ♥ ♥</div>
-  <div class="level" id="levelEl">LEVEL 1</div>
-</div>
-
-<div class="start-btn" id="startBtn">TAP TO START</div>
 <div class="btn left" data-key="left" aria-label="rotate left">⟲</div>
 <div class="btn right" data-key="right" aria-label="rotate right">⟳</div>
 <div class="btn thrust" data-key="thrust" aria-label="thrust">▲</div>
 <div class="btn fire" data-key="fire" aria-label="fire">●</div>
+
+<div class="start-instruction" id="startInstruction">TAP TO START</div>
 <script>
 (()=>{
 'use strict';
@@ -104,30 +86,59 @@ document.querySelectorAll('.btn').forEach(b=>{
   b.addEventListener('mousedown',()=>keys[k]=true);
   b.addEventListener('mouseup',()=>keys[k]=false);
 });
-window.addEventListener('keydown',e=>{
-  if(e.key==='ArrowLeft'||e.key==='a')keys.left=true;
-  if(e.key==='ArrowRight'||e.key==='d')keys.right=true;
-  if(e.key==='ArrowUp'||e.key==='w')keys.thrust=true;
-  if(e.key===' ')keys.fire=true;
-});
-window.addEventListener('keyup',e=>{
-  if(e.key==='ArrowLeft'||e.key==='a')keys.left=false;
-  if(e.key==='ArrowRight'||e.key==='d')keys.right=false;
-  if(e.key==='ArrowUp'||e.key==='w')keys.thrust=false;
-  if(e.key===' ')keys.fire=false;
-});
 
 // Game state
 let score=0,lives=3,level=1,state='ready';
 let player,cannon,rings=[],mines=[],playerBullets=[],cannonBullets=[];
 let shootCooldown=0,mineTimer=0,levelTimer=0;
+let highScore=parseInt(localStorage.getItem('starCastleHigh'))||0;
+
+// Particle system
+let particles=[];
+function addParticles(x,y,color,count){
+  for(let i=0;i<count;i++){
+    const angle=Math.random()*Math.PI*2;
+    const speed=1+Math.random()*3;
+    particles.push({x,y,vx:Math.cos(angle)*speed*SCALE,vy:Math.sin(angle)*speed*SCALE,life:30+Math.random()*20,color,size:2+Math.random()*3*SCALE});
+  }
+}
+
+// Screen shake
+let screenShake={x:0,y:0,intensity:0};
+function addScreenShake(intensity){screenShake.intensity=intensity;}
+
+// Stars background
+let stars=[];
+for(let i=0;i<100;i++){
+  stars.push({x:Math.random()*W,y:Math.random()*H,size:0.5+Math.random()*1.5*SCALE,speed:0.2+Math.random()*0.8,brightness:0.3+Math.random()*0.7});
+}
+
+// Audio
+let audioCtx=null;
+function initAudio(){if(!audioCtx){try{audioCtx=new(window.AudioContext||window.webkitAudioContext)();}catch(e){}}}
+function playSound(type){
+  if(!audioCtx)return;
+  const osc=audioCtx.createOscillator();const gain=audioCtx.createGain();
+  osc.connect(gain);gain.connect(audioCtx.destination);const now=audioCtx.currentTime;
+  switch(type){
+    case 'thrust':osc.type='sawtooth';osc.frequency.setValueAtTime(80,now);osc.frequency.exponentialRampToValueAtTime(40,now+0.1);gain.gain.setValueAtTime(0.1,now);gain.gain.exponentialRampToValueAtTime(0.01,now+0.1);osc.start(now);osc.stop(now+0.1);break;
+    case 'fire':osc.type='square';osc.frequency.setValueAtTime(800,now);osc.frequency.exponentialRampToValueAtTime(200,now+0.1);gain.gain.setValueAtTime(0.2,now);gain.gain.exponentialRampToValueAtTime(0.01,now+0.1);osc.start(now);osc.stop(now+0.1);break;
+    case 'explosion':osc.type='sawtooth';osc.frequency.setValueAtTime(200,now);osc.frequency.exponentialRampToValueAtTime(50,now+0.3);gain.gain.setValueAtTime(0.3,now);gain.gain.exponentialRampToValueAtTime(0.01,now+0.3);osc.start(now);osc.stop(now+0.3);break;
+    case 'levelComplete':osc.type='sine';osc.frequency.setValueAtTime(400,now);osc.frequency.linearRampToValueAtTime(800,now+0.2);osc.frequency.linearRampToValueAtTime(1200,now+0.4);gain.gain.setValueAtTime(0.2,now);gain.gain.linearRampToValueAtTime(0,now+0.5);osc.start(now);osc.stop(now+0.5);break;
+    case 'gameOver':osc.type='sawtooth';osc.frequency.setValueAtTime(300,now);osc.frequency.exponentialRampToValueAtTime(50,now+1.0);gain.gain.setValueAtTime(0.3,now);gain.gain.exponentialRampToValueAtTime(0.01,now+1.0);osc.start(now);osc.stop(now+1.0);break;
+  }
+}
+
+// Initialize audio on first interaction
+document.addEventListener('touchstart',()=>{initAudio();if(state==='ready'){state='playing';initLevel();}},{once:true});
+document.addEventListener('mousedown',()=>{initAudio();if(state==='ready'){state='playing';initLevel();}},{once:true});
 
 function initLevel(){
   player={x:CX,y:CY-120*SCALE,vx:0,vy:0,angle:-Math.PI/2,radius:12*SCALE,invincible:0};
   cannon={x:CX,y:CY,angle:0,firing:false,fireTimer:0};
   rings=[];
   
-  // Three concentric rings with alternating rotation directions
+  // Three concentric rings - outer to inner
   const ringConfigs=[
     {radius:140*SCALE,segments:12,hits:2,speed:0.008*level,dir:1,color:'#ffcc00'},
     {radius:200*SCALE,segments:12,hits:2,speed:-0.006*level,dir:-1,color:'#ff8800'},
@@ -142,41 +153,25 @@ function initLevel(){
     rings.push({...cfg,segments:segs,rotation:0});
   });
   
-  mines=[];
-  playerBullets=[];
-  cannonBullets=[];
+  mines=[];playerBullets=[];cannonBullets=[];
   shootCooldown=0;mineTimer=60;levelTimer=0;
 }
 
 function spawnMine(){
   const angle=Math.random()*Math.PI*2;
   const dist=30*SCALE+Math.random()*20*SCALE;
-  mines.push({
-    x:CX+Math.cos(angle)*dist,
-    y:CY+Math.sin(angle)*dist,
-    angle:angle,
-    speed:(1.2*level+Math.random()*0.5)*SCALE,
-    radius:6*SCALE,
-    life:600
-  });
+  mines.push({x:CX+Math.cos(angle)*dist,y:CY+Math.sin(angle)*dist,angle,vx:0,vy:0,speed:(1.2*level+Math.random()*0.5)*SCALE,radius:6*SCALE,life:600});
 }
 
 function shootPlayerBullet(){
   if(shootCooldown>0||playerBullets.length>=4)return;
   const speed=8*SCALE;
-  playerBullets.push({
-    x:player.x+Math.cos(player.angle)*15*SCALE,
-    y:player.y+Math.sin(player.angle)*15*SCALE,
-    vx:Math.cos(player.angle)*speed+player.vx*0.3,
-    vy:Math.sin(player.angle)*speed+player.vy*0.3,
-    life:80
-  });
+  playerBullets.push({x:player.x+Math.cos(player.angle)*15*SCALE,y:player.y+Math.sin(player.angle)*15*SCALE,vx:Math.cos(player.angle)*speed+player.vx*0.3,vy:Math.sin(player.angle)*speed+player.vy*0.3,life:80});
   shootCooldown=12;
 }
 
 function checkCollision(x,y,radius,obj){
-  const dx=x-obj.x,dy=y-obj.y;
-  return Math.sqrt(dx*dx+dy*dy)<radius+obj.radius;
+  const dx=x-obj.x,dy=y-obj.y;return Math.sqrt(dx*dx+dy*dy)<radius+obj.radius;
 }
 
 function update(){
@@ -187,14 +182,14 @@ function update(){
   if(keys.left)player.angle-=rotSpeed;
   if(keys.right)player.angle+=rotSpeed;
   
-  // Thrust
+  // Thrust with proper inertia
   if(keys.thrust){
     player.vx+=Math.cos(player.angle)*0.15*SCALE;
     player.vy+=Math.sin(player.angle)*0.15*SCALE;
   }
   
-  // Friction
-  player.vx*=0.98;player.vy*=0.98;
+  // Friction (minimal for Asteroids-style)
+  player.vx*=0.99;player.vy*=0.99;
   
   // Move player
   player.x+=player.vx;player.y+=player.vy;
@@ -212,21 +207,23 @@ function update(){
   
   // Update player bullets
   playerBullets.forEach(b=>{b.x+=b.vx;b.y+=b.vy;b.life--;});
-  playerBullets=playerBullets.filter(b=>b.life>0&&b.x>0&&b.x<W&&b.y>0&&b.y<H);
+  playerBullets=playerBullets.filter(b=>b.life>0&&b.x>-50*SCALE&&b.x<W+50*SCALE&&b.y>-50*SCALE&&b.y<H+50*SCALE);
+  
+  // Play fire sound when shooting
+  if(keys.fire&&shootCooldown===11)playSound('fire');
   
   // Update cannon (tracks player)
   const dx=player.x-cannon.x,dy=player.y-cannon.y;
   cannon.angle=Math.atan2(dy,dx);
   
-  // Cannon fires when there's a gap in shields (any ring has destroyed segments)
-  const hasGap=rings.some(r=>r.segments.some(s=>s.hits===0));
-  if(hasGap){
+  // Cannon fires when ALL rings are breached (inner ring destroyed)
+  const allRingsBreached=rings.every(r=>r.segments.every(s=>s.hits===0));
+  if(allRingsBreached){
     cannon.fireTimer++;
-    if(cannon.fireTimer>40){
-      // Fire a powerful bullet toward player
+    if(cannon.fireTimer>30){
       const dist=Math.sqrt(dx*dx+dy*dy)||1;
-      const speed=5*SCALE;
-      cannonBullets.push({x:cannon.x,y:cannon.y,vx:dx/dist*speed,vy:dy/dist*speed,life:120});
+      const speed=6*SCALE;
+      cannonBullets.push({x:cannon.x,y:cannon.y,vx:dx/dist*speed,vy:dy/dist*speed,life:150});
       cannon.fireTimer=0;
     }
   }else{cannon.fireTimer=0;}
@@ -243,33 +240,41 @@ function update(){
   
   // Spawn mines periodically
   mineTimer--;
-  if(mineTimer<=0&&mines.length<3+level){
-    spawnMine();
-    mineTimer=Math.max(60,180-level*20);
-  }
+  if(mineTimer<=0&&mines.length<3+level){spawnMine();mineTimer=Math.max(60,180-level*20);}
   
   // Update mines (homing toward player)
   mines.forEach(m=>{
     const dx=player.x-m.x,dy=player.y-m.y;
     const dist=Math.sqrt(dx*dx+dy*dy)||1;
     m.vx=dx/dist*m.speed;m.vy=dy/dist*m.speed;
-    m.x+=m.vx;m.y+=m.vy;
-    m.life--;
+    m.x+=m.vx;m.y+=m.vy;m.life--;
   });
   mines=mines.filter(m=>m.life>0&&m.x>-50*SCALE&&m.x<W+50*SCALE&&m.y>-50*SCALE&&m.y<H+50*SCALE);
   
-  // Collision: player bullets vs ring segments
+  // Collision: player bullets vs ring segments (arc-based)
   playerBullets.forEach(b=>{
     rings.forEach(r=>{
       r.segments.forEach(s=>{
         if(s.hits>0){
-          const segAngle=s.angle+r.rotation;
-          const bx=CX+Math.cos(segAngle)*r.radius;
-          const by=CY+Math.sin(segAngle)*r.radius;
-          if(Math.sqrt((b.x-bx)**2+(b.y-by)**2)<15*SCALE){
-            s.hits--;
-            b.life=0;
-            if(s.hits===0)score+=10*level;
+          const dx=b.x-CX,dy=b.y-CY;
+          let bulletAngle=Math.atan2(dy,dx);
+          
+          const segHalfWidth=Math.PI/r.segments.length*0.9;
+          const segStart=s.angle+r.rotation-segHalfWidth;
+          const segEnd=s.angle+r.rotation+segHalfWidth;
+          
+          let normBullet=bulletAngle;while(normBullet>Math.PI)normBullet-=2*Math.PI;while(normBullet<-Math.PI)normBullet+=2*Math.PI;
+          let normStart=segStart;while(normStart>Math.PI)normStart-=2*Math.PI;while(normStart<-Math.PI)normStart+=2*Math.PI;
+          let normEnd=segEnd;while(normEnd>Math.PI)normEnd-=2*Math.PI;while(normEnd<-Math.PI)normEnd+=2*Math.PI;
+          
+          const angleInSegment=(normBullet>=normStart&&normBullet<=normEnd);
+          const distFromCenter=Math.sqrt(dx*dx+dy*dy);
+          const radiusDiff=Math.abs(distFromCenter-r.radius);
+          const segmentThickness=20*SCALE;
+          
+          if(angleInSegment&&radiusDiff<segmentThickness){
+            s.hits--;b.life=0;
+            if(s.hits===0){score+=10*level;addParticles(b.x,b.y,r.color,8);}
           }
         }
       });
@@ -279,56 +284,74 @@ function update(){
   // Check if any complete ring is destroyed (regeneration mechanic)
   rings.forEach((r,idx)=>{
     if(r.segments.every(s=>s.hits===0)&&idx<2){
-      // This ring is completely destroyed, shift inner rings outward
-      const nextRing=rings[idx+1];
-      r.radius=nextRing.radius;
-      r.segments.forEach((s,i)=>{
-        s.angle=i*(Math.PI*2/r.segments.length);
-        s.hits=s.maxHits;
-      });
-      r.speed=nextRing.speed*0.8; // Slow down slightly
+      // This ring is completely destroyed, shift inner rings OUTWARD
+      
+      // Move this ring to the position of the next OUTER ring
+      const outerRing=rings[idx+1];
+      
+      // Swap positions - this ring takes the outer ring's radius
+      const tempRadius=r.radius;
+      r.radius=outerRing.radius;
+      outerRing.radius=tempRadius;
+      
+      // Reset segments to full health and proper angles for new radius
+      r.segments.forEach((s,i)=>{s.angle=i*(Math.PI*2/r.segments.length);s.hits=s.maxHits;});
+      
+      // Maintain rotation speed relative to new radius position
+      r.speed=outerRing.speed;
     }
   });
   
-  // Collision: player bullets vs cannon (only if inner ring breached)
-  const innerRingBreached=rings[0].segments.every(s=>s.hits===0);
-  if(innerRingBreached){
+  // Collision: player bullets vs central core (the actual objective)
+  if(allRingsBreached){
     playerBullets.forEach(b=>{
-      if(Math.sqrt((b.x-cannon.x)**2+(b.y-cannon.y)**2)<20*SCALE){
-        b.life=0;score+=100*level;state='levelComplete';levelTimer=90;
+      // Check collision with cannon barrel (50 points)
+      if(Math.sqrt((b.x-cannon.x)**2+(b.y-cannon.y)**2)<15*SCALE){
+        b.life=0;score+=50*level;addParticles(b.x,b.y,'#fff',5);
+      }
+      
+      // Check collision with central core (200 points - level complete!)
+      const dist=Math.sqrt((b.x-cannon.x)**2+(b.y-cannon.y)**2);
+      if(dist<18*SCALE){
+        b.life=0;score+=200*level;state='levelComplete';levelTimer=120;
+        addParticles(b.x,b.y,'#f00',20);addScreenShake(12);playSound('levelComplete');
       }
     });
   }
   
-  // Collision: mines vs player
+  // Collision: player vs mines (homing missiles)
   if(player.invincible===0){
     mines.forEach(m=>{
-      if(checkCollision(player.x,player.y,player.radius,m)){
-        playerHit();
-      }
+      const dx=player.x-m.x,dy=player.y-m.y;
+      if(Math.sqrt(dx*dx+dy*dy)<player.radius+m.radius)playerHit();
     });
   }
   
   // Collision: cannon bullets vs player
   if(player.invincible===0){
     cannonBullets.forEach(b=>{
-      if(checkCollision(player.x,player.y,player.radius,b)){
-        playerHit();b.life=0;
-      }
+      const dx=player.x-b.x,dy=player.y-b.y;
+      if(Math.sqrt(dx*dx+dy*dy)<player.radius+5*SCALE){playerHit();b.life=0;}
     });
   }
-  
-  // Cleanup dead bullets
-  playerBullets=playerBullets.filter(b=>b.life>0);
-  cannonBullets=cannonBullets.filter(b=>b.life>0);
   
   // Level complete transition
   if(state==='levelComplete'){
     levelTimer--;
     if(levelTimer===0){
+      if(score>highScore){highScore=score;localStorage.setItem('starCastleHigh',highScore.toString());}
       level++;initLevel();state='playing';
     }
   }
+  
+  // Update particles and effects
+  particles.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.life--;p.size*=0.95;});
+  particles=particles.filter(p=>p.life>0);
+  
+  if(screenShake.intensity>0){screenShake.x=(Math.random()-0.5)*screenShake.intensity*2;screenShake.y=(Math.random()-0.5)*screenShake.intensity*2;screenShake.intensity*=0.9;if(screenShake.intensity<0.5)screenShake.intensity=0;}
+  else{screenShake.x=0;screenShake.y=0;}
+  
+  stars.forEach(s=>{s.y+=s.speed;if(s.y>H){s.y=0;s.x=Math.random()*W;}});
   
   // Update HUD
   document.getElementById('scoreEl').textContent='SCORE: '+score;
@@ -339,121 +362,132 @@ function update(){
 
 function playerHit(){
   lives--;player.invincible=120;
-  if(lives<=0)state='gameover';
+  addParticles(player.x,player.y,'#0ff',15);addScreenShake(8);playSound('explosion');
+  if(lives<=0){state='gameover';playSound('gameOver');}
+  else{player.x=CX;player.y=CY-120*SCALE;player.vx=0;player.vy=0;player.angle=-Math.PI/2;}
 }
 
 function draw(){
   ctx.fillStyle='#000';ctx.fillRect(0,0,W,H);
   
-  // Stars background
-  ctx.fillStyle='rgba(255,255,255,0.3)';
-  for(let i=0;i<50;i++){
-    const x=(i*137.5)%W,y=(i*243.7)%H;
-    ctx.fillRect(x,y,1*SCALE,1*SCALE);
-  }
+  // Apply screen shake offset
+  ctx.save();ctx.translate(screenShake.x,screenShake.y);
+  
+  // Draw stars background with parallax
+  ctx.fillStyle='rgba(255,255,255,0.6)';
+  stars.forEach(s=>{ctx.globalAlpha=s.brightness;ctx.fillRect(s.x,s.y,s.size,s.size);});
+  ctx.globalAlpha=1;
   
   if(state==='ready'){
-    ctx.fillStyle='#fff';ctx.font='bold '+28*SCALE+'px Courier New';
-    ctx.textAlign='center';ctx.fillText('STAR CASTLE',CX,CY-40*SCALE);
-    ctx.font='16px Courier New';ctx.fillStyle='#9cf';
-    ctx.fillText('Destroy the cannon!',CX,CY+10*SCALE);
-    ctx.fillText('Tap to start',CX,CY+40*SCALE);
-    return;
+    ctx.fillStyle='#fff';ctx.font='bold '+28*SCALE+'px Courier New';ctx.textAlign='center';
+    ctx.fillText('STAR CASTLE',CX,CY-40*SCALE);ctx.font='16px Courier New';ctx.fillStyle='#9cf';
+    ctx.fillText('Destroy the cannon!',CX,CY+10*SCALE);ctx.fillText('Tap to start',CX,CY+40*SCALE);
+    ctx.restore();return;
   }
   
-  // Draw rings (vector style with glow)
-  ctx.shadowBlur=10*SCALE;ctx.shadowColor='rgba(255,255,255,0.5)';
+  // Draw rings (enhanced vector style with glow)
+  ctx.shadowBlur=12*SCALE;ctx.shadowColor='rgba(255,255,255,0.6)';
   rings.forEach(r=>{
-    ctx.strokeStyle=r.color;ctx.lineWidth=2*SCALE;
+    ctx.strokeStyle=r.color;ctx.lineWidth=3*SCALE;
     r.segments.forEach(s=>{
       if(s.hits>0){
         const a=s.angle+r.rotation;
-        ctx.beginPath();
-        ctx.arc(CX,CY,r.radius,a-0.25,a+0.25);
-        ctx.stroke();
+        ctx.shadowBlur=15*SCALE;ctx.shadowColor=r.color;
+        ctx.beginPath();ctx.arc(CX,CY,r.radius,a-0.25,a+0.25);ctx.stroke();
+        ctx.shadowBlur=8*SCALE;ctx.shadowColor='rgba(255,255,255,0.8)';ctx.lineWidth=1.5*SCALE;
+        ctx.beginPath();ctx.arc(CX,CY,r.radius,a-0.25,a+0.25);ctx.stroke();
+        ctx.lineWidth=3*SCALE;
       }
     });
   });
   ctx.shadowBlur=0;
   
-  // Draw cannon (center) with glow
+  // Draw cannon (center) with glow and core
   ctx.save();ctx.translate(cannon.x,cannon.y);ctx.rotate(cannon.angle);
-  ctx.shadowBlur=8*SCALE;ctx.shadowColor='rgba(255,255,255,0.7)';
-  ctx.strokeStyle='#fff';ctx.lineWidth=3*SCALE;
-  // Cannon barrel
+  ctx.shadowBlur=8*SCALE;ctx.shadowColor='rgba(255,255,255,0.7)';ctx.strokeStyle='#fff';ctx.lineWidth=3*SCALE;
   ctx.beginPath();ctx.moveTo(-8*SCALE,0);ctx.lineTo(18*SCALE,0);ctx.stroke();
-  // Cannon base
   ctx.beginPath();ctx.arc(0,0,12*SCALE,0,Math.PI*2);ctx.stroke();
   ctx.restore();
+  
+  // Draw central core (the actual objective) - only visible when all rings breached
+  if(allRingsBreached){
+    ctx.save();ctx.translate(cannon.x,cannon.y);
+    ctx.shadowBlur=15*SCALE;ctx.shadowColor='rgba(255,0,0,0.9)';ctx.strokeStyle='#f00';ctx.lineWidth=3*SCALE;
+    const coreRadius=15*SCALE;ctx.beginPath();
+    for(let i=0;i<6;i++){const angle=i*Math.PI/3;const x=Math.cos(angle)*coreRadius;const y=Math.sin(angle)*coreRadius;if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);}
+    ctx.closePath();ctx.stroke();
+    ctx.fillStyle='rgba(255,0,0,0.3)';ctx.fill();
+    const pulse=Math.sin(Date.now()/200)*3*SCALE;ctx.beginPath();ctx.arc(0,0,8*SCALE+pulse,0,Math.PI*2);
+    ctx.strokeStyle='rgba(255,100,100,0.8)';ctx.lineWidth=2*SCALE;ctx.stroke();
+    ctx.restore();
+  }
   ctx.shadowBlur=0;
   
   // Draw mines (homing missiles) with glow
-  ctx.shadowBlur=6*SCALE;ctx.shadowColor='rgba(255,255,0,0.8)';
-  ctx.fillStyle='#ff0';
-  mines.forEach(m=>{
-    ctx.beginPath();ctx.arc(m.x,m.y,m.radius,0,Math.PI*2);ctx.fill();
-  });
+  ctx.shadowBlur=6*SCALE;ctx.shadowColor='rgba(255,255,0,0.8)';ctx.fillStyle='#ff0';
+  mines.forEach(m=>{ctx.beginPath();ctx.arc(m.x,m.y,m.radius,0,Math.PI*2);ctx.fill();});
   ctx.shadowBlur=0;
   
   // Draw player bullets (vector lines with glow)
-  ctx.shadowBlur=6*SCALE;ctx.shadowColor='rgba(0,255,255,0.8)';
-  ctx.strokeStyle='#0ff';ctx.lineWidth=2*SCALE;
-  playerBullets.forEach(b=>{
-    ctx.beginPath();ctx.moveTo(b.x,b.y);
-    ctx.lineTo(b.x-b.vx*0.5,b.y-b.vy*0.5);ctx.stroke();
-  });
+  ctx.shadowBlur=6*SCALE;ctx.shadowColor='rgba(0,255,255,0.8)';ctx.strokeStyle='#0ff';ctx.lineWidth=2*SCALE;
+  playerBullets.forEach(b=>{ctx.beginPath();ctx.moveTo(b.x,b.y);ctx.lineTo(b.x-b.vx*0.5,b.y-b.vy*0.5);ctx.stroke();});
   ctx.shadowBlur=0;
   
   // Draw cannon bullets (explosive with glow)
-  ctx.shadowBlur=8*SCALE;ctx.shadowColor='rgba(255,136,0,0.9)';
-  ctx.strokeStyle='#f80';ctx.lineWidth=3*SCALE;
-  cannonBullets.forEach(b=>{
-    ctx.beginPath();ctx.arc(b.x,b.y,4*SCALE,0,Math.PI*2);ctx.fill();
-  });
+  ctx.shadowBlur=8*SCALE;ctx.shadowColor='rgba(255,136,0,0.9)';ctx.strokeStyle='#f80';ctx.lineWidth=3*SCALE;
+  cannonBullets.forEach(b=>{ctx.beginPath();ctx.arc(b.x,b.y,4*SCALE,0,Math.PI*2);ctx.fill();});
   ctx.shadowBlur=0;
   
-  // Draw player ship (vector style with glow)
+  // Draw player ship (enhanced vector style with glow)
   if(player.invincible===0||Math.floor(Date.now()/100)%2===0){
     ctx.save();ctx.translate(player.x,player.y);ctx.rotate(player.angle);
-    ctx.shadowBlur=8*SCALE;ctx.shadowColor='rgba(0,255,255,0.7)';
-    ctx.strokeStyle='#0ff';ctx.lineWidth=2*SCALE;
-    // Ship body
-    ctx.beginPath();
-    ctx.moveTo(12*SCALE,0);ctx.lineTo(-8*SCALE,-7*SCALE);
-    ctx.lineTo(-4*SCALE,0);ctx.lineTo(-8*SCALE,7*SCALE);
+    ctx.shadowBlur=8*SCALE;ctx.shadowColor='rgba(0,255,255,0.7)';ctx.strokeStyle='#0ff';ctx.lineWidth=2*SCALE;
+    ctx.beginPath();ctx.moveTo(14*SCALE,0);ctx.lineTo(6*SCALE,-5*SCALE);ctx.lineTo(-2*SCALE,-8*SCALE);
+    ctx.lineTo(-6*SCALE,-4*SCALE);ctx.lineTo(-8*SCALE,0);ctx.lineTo(-6*SCALE,4*SCALE);
+    ctx.lineTo(-2*SCALE,8*SCALE);ctx.lineTo(6*SCALE,5*SCALE);ctx.closePath();ctx.stroke();
+    ctx.beginPath();ctx.moveTo(8*SCALE,0);ctx.lineTo(4*SCALE,-2*SCALE);ctx.lineTo(4*SCALE,2*SCALE);
     ctx.closePath();ctx.stroke();
-    // Thrust flame
     if(keys.thrust){
-      ctx.strokeStyle='#f80';ctx.lineWidth=2*SCALE;
-      ctx.beginPath();ctx.moveTo(-6*SCALE,-4*SCALE);
-      ctx.lineTo(-12*SCALE,0);ctx.lineTo(-6*SCALE,4*SCALE);
-      ctx.stroke();
+      ctx.strokeStyle='#f80';ctx.lineWidth=2*SCALE;const flameLength=6+Math.random()*4*SCALE;
+      ctx.beginPath();ctx.moveTo(-8*SCALE,-3*SCALE);ctx.lineTo(-8*SCALE-flameLength,0);ctx.lineTo(-8*SCALE,3*SCALE);ctx.stroke();
+      ctx.strokeStyle='#ff0';ctx.lineWidth=1*SCALE;const innerFlame=flameLength*0.6;
+      ctx.beginPath();ctx.moveTo(-8*SCALE,-2*SCALE);ctx.lineTo(-8*SCALE-innerFlame,0);ctx.lineTo(-8*SCALE,2*SCALE);ctx.stroke();
     }
     ctx.restore();
   }
   ctx.shadowBlur=0;
   
-  // Level complete text
+  // Draw level complete text with score summary
   if(state==='levelComplete'){
-    ctx.fillStyle='#0f0';ctx.font='bold '+24*SCALE+'px Courier New';
-    ctx.textAlign='center';ctx.fillText('LEVEL '+level+' COMPLETE',CX,CY);
+    ctx.fillStyle='rgba(0,255,0,0.1)';ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='#0f0';ctx.font='bold '+28*SCALE+'px Courier New';ctx.textAlign='center';
+    ctx.fillText('LEVEL '+level+' COMPLETE',CX,CY-30*SCALE);ctx.fillStyle='#fff';ctx.font='16px Courier New';
+    ctx.fillText('Score: '+score,CX,CY+10*SCALE);
+    if(score>=highScore){ctx.fillStyle='#ff0';ctx.font='bold '+14*SCALE+'px Courier New';ctx.fillText('NEW HIGH SCORE!',CX,CY+40*SCALE);}
   }
   
   // Game over screen
   if(state==='gameover'){
-    ctx.fillStyle='#f00';ctx.font='bold '+32*SCALE+'px Courier New';
-    ctx.textAlign='center';ctx.fillText('GAME OVER',CX,CY-20*SCALE);
-    ctx.fillStyle='#fff';ctx.font='16px Courier New';
-    ctx.fillText('Score: '+score,CX,CY+20*SCALE);
-    ctx.fillText('Tap to restart',CX,CY+50*SCALE);
+    ctx.fillStyle='rgba(0,0,0,0.7)';ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='#f00';ctx.font='bold '+36*SCALE+'px Courier New';ctx.textAlign='center';
+    ctx.fillText('GAME OVER',CX,CY-40*SCALE);ctx.fillStyle='#fff';ctx.font='18px Courier New';
+    ctx.fillText('Score: '+score,CX,CY+10*SCALE);
+    if(score>=highScore){ctx.fillStyle='#ff0';ctx.font='bold '+14*SCALE+'px Courier New';ctx.fillText('NEW HIGH SCORE!',CX,CY+40*SCALE);}
+    ctx.fillStyle='#9cf';ctx.font='16px Courier New';ctx.fillText('Tap to restart',CX,CY+70*SCALE);
   }
+  
+  ctx.restore(); // End screen shake offset
+  
+  // Draw particles on top (no shake)
+  ctx.shadowBlur=4*SCALE;particles.forEach(p=>{ctx.fillStyle=p.color;ctx.globalAlpha=p.life/50;ctx.beginPath();ctx.arc(p.x,p.y,p.size,0,Math.PI*2);ctx.fill();});
+  ctx.globalAlpha=1;ctx.shadowBlur=0;
 }
 
 // Start/restart on tap/click
-document.getElementById('startBtn').addEventListener('click',()=>{
+document.getElementById('startInstruction').addEventListener('click',()=>{
   if(state==='ready'||state==='gameover'){initLevel();state='playing';}
 });
-document.getElementById('startBtn').addEventListener('touchend',e=>{
+document.getElementById('startInstruction').addEventListener('touchend',e=>{
   e.preventDefault();
   if(state==='ready'||state==='gameover'){initLevel();state='playing';}
 },{passive:false});
@@ -465,10 +499,10 @@ canvas.addEventListener('mousedown',()=>{
   if(state==='ready'||state==='gameover'){initLevel();state='playing';}
 });
 
-// Hide start button when game starts
+// Hide start instruction when game starts
 const origInitLevel = initLevel;
 initLevel = function(){
-  document.getElementById('startBtn').style.display='none';
+  document.getElementById('startInstruction').style.display='none';
   origInitLevel();
 };
 
