@@ -33,7 +33,7 @@ resize();
 window.addEventListener('resize',resize);
 
 // Game state
-let state='attract';
+let gameState='attract';
 let player={x:0,y:0,vx:0,vy:0,angle:-Math.PI/2,speed:0,radius:12};
 let cannon={x:0,y:0,angle:0,firing:false,health:10};
 let rings=[];
@@ -101,576 +101,562 @@ function shoot(){
     y:player.y+Math.sin(player.angle)*20,
     vx:Math.cos(player.angle)*speed,
     vy:Math.sin(player.angle)*speed,
-    radius:3,
-    life:60
+    radius:3
   });
-}
-
-// Create explosion particles
-function createExplosion(x,y,color,count){
-  for(let i=0;i<count;i++){
-    const angle=Math.random()*Math.PI*2;
-    const speed=1+Math.random()*3;
-    particles.push({
-      x:x,
-      y:y,
-      vx:Math.cos(angle)*speed,
-      vy:Math.sin(angle)*speed,
-      life:30+Math.random()*20,
-      color:color,
-      size:2+Math.random()*3
-    });
-  }
 }
 
 // Update game
 function update(){
-  if(state!=='playing')return;
+  if(gameState!=='playing')return;
   
   // Player rotation (keyboard) - Asteroids style
   if(keys['ArrowLeft']||keys['a'])player.angle-=0.08;
   if(keys['ArrowRight']||keys['d'])player.angle+=0.08;
   
-  // Player thrust (keyboard) - Asteroids style with inertia
+  // Player thrust (keyboard) - Asteroids style
   if(keys['ArrowUp']||keys['w']){
-    player.vx+=Math.cos(player.angle)*0.18;
-    player.vy+=Math.sin(player.angle)*0.18;
+    player.vx+=Math.cos(player.angle)*0.15;
+    player.vy+=Math.sin(player.angle)*0.15;
   }
   
-  // Touch joystick controls - full movement
-  if(touchJoystick.active){
-    const angle=Math.atan2(touchJoystick.dy,touchJoystick.dx);
-    player.angle=angle;
-    
-    const dist=Math.sqrt(touchJoystick.dx*touchJoystick.dx+touchJoystick.dy*touchJoystick.dy);
-    if(dist>15){
-      const thrust=Math.min(dist/60,1)*0.25;
-      player.vx+=Math.cos(angle)*thrust;
-      player.vy+=Math.sin(angle)*thrust;
-    }
+  // Touch controls - Asteroids style
+  if(touchInput.left)player.angle-=0.08;
+  if(touchInput.right)player.angle+=0.08;
+  if(touchInput.thrust){
+    player.vx+=Math.cos(player.angle)*0.15;
+    player.vy+=Math.sin(player.angle)*0.15;
   }
   
-  // Apply friction/drag (less than Asteroids for better control)
-  player.vx*=0.97;
-  player.vy*=0.97;
+  // Apply friction and limits
+  player.vx*=0.98;
+  player.vy*=0.98;
+  const speed=Math.sqrt(player.vx*player.vx+player.vy*player.vy);
+  if(speed>8){
+    player.vx=(player.vx/speed)*8;
+    player.vy=(player.vy/speed)*8;
+  }
   
-  // Update player position
+  // Update position with momentum (Asteroids style)
   player.x+=player.vx;
   player.y+=player.vy;
   
-  // Wrap around screen edges (Asteroids style)
-  if(player.x<-20)player.x=W+20;
-  if(player.x>W+20)player.x=-20;
-  if(player.y<-20)player.y=H+20;
-  if(player.y>H+20)player.y=-20;
+  // Wrap around screen edges
+  if(player.x<0)player.x=W;
+  if(player.x>W)player.x=0;
+  if(player.y<0)player.y=H;
+  if(player.y>H)player.y=0;
   
   // Update bullets
-  bullets.forEach(b=>{b.x+=b.vx;b.y+=b.vy;b.life--;});
-  bullets=bullets.filter(b=>b.life>0&&b.x>-50&&b.x<W+50&&b.y>-50&&b.y<H+50);
+  for(let i=bullets.length-1;i>=0;i--){
+    const b=bullets[i];
+    b.x+=b.vx;
+    b.y+=b.vy;
+    
+    // Remove if off screen
+    if(b.x<0||b.x>W||b.y<0||b.y>H){
+      bullets.splice(i,1);
+      continue;
+    }
+    
+    // Check collision with ring segments
+    let hit=false;
+    for(let r=0;r<rings.length&&!hit;r++){
+      const ring=rings[r];
+      for(let s=0;s<ring.segments.length&&!hit;s++){
+        const seg=ring.segments[s];
+        if(seg.hits<=0)continue;
+        
+        // Calculate segment position
+        const segX=ring.x+Math.cos(ring.rotation+seg.angle)*ring.radius;
+        const segY=ring.y+Math.sin(ring.rotation+seg.angle)*ring.radius;
+        
+        // Check distance
+        const dist=Math.sqrt((b.x-segX)**2+(b.y-segY)**2);
+        if(dist<ring.radius*0.3){
+          seg.hits--;
+          hit=true;
+          
+          // Add particles
+          for(let p=0;p<5;p++){
+            particles.push({
+              x:segX,y:segY,
+              vx:(Math.random()-0.5)*4,
+              vy:(Math.random()-0.5)*4,
+              life:30,
+              color:'#ff0'
+            });
+          }
+          
+          // Check if ring is destroyed
+          if(ring.segments.every(s=>s.hits<=0)){
+            score+=100*level;
+            
+            // Check if this is the outer ring (first one) - trigger regeneration
+            if(r===0){
+              ringRegenerating=true;
+              regenTimer=120; // 2 seconds at 60fps
+            }
+          }
+        }
+      }
+    }
+    
+    if(hit){
+      bullets.splice(i,1);
+    }
+  }
   
   // Update cannon bullets
-  cannonBullets.forEach(b=>{b.x+=b.vx;b.y+=b.vy;});
-  cannonBullets=cannonBullets.filter(b=>b.x>-50&&b.x<W+50&&b.y>-50&&b.y<H+50);
+  for(let i=cannonBullets.length-1;i>=0;i--){
+    const b=cannonBullets[i];
+    b.x+=b.vx;
+    b.y+=b.vy;
+    
+    // Remove if off screen
+    if(b.x<0||b.x>W||b.y<0||b.y>H){
+      cannonBullets.splice(i,1);
+      continue;
+    }
+    
+    // Check collision with player
+    const dist=Math.sqrt((b.x-player.x)**2+(b.y-player.y)**2);
+    if(dist<player.radius){
+      lives--;
+      cannonBullets.splice(i,1);
+      
+      // Add explosion particles
+      for(let p=0;p<20;p++){
+        particles.push({
+          x:player.x,y:player.y,
+          vx:(Math.random()-0.5)*6,
+          vy:(Math.random()-0.5)*6,
+          life:40,
+          color:'#f00'
+        });
+      }
+      
+      if(lives<=0){
+        gameState='gameover';
+      }else{
+        // Respawn player
+        player.x=W/2;
+        player.y=H-100;
+        player.vx=0;player.vy=0;player.angle=-Math.PI/2;
+      }
+    }
+  }
   
-  // Update homing mines (track player)
-  mines.forEach(m=>{
-    const dx=player.x-m.x;
-    const dy=player.y-m.y;
+  // Update mines (homing behavior)
+  for(let i=0;i<mines.length;i++){
+    const mine=mines[i];
+    
+    // Track player position (homing)
+    const dx=player.x-mine.x;
+    const dy=player.y-mine.y;
     const dist=Math.sqrt(dx*dx+dy*dy);
     
     if(dist>0){
-      m.vx+=(dx/dist)*m.speed*0.02;
-      m.vy+=(dy/dist)*m.speed*0.02;
+      mine.vx+=(dx/dist)*mine.speed*0.02;
+      mine.vy+=(dy/dist)*mine.speed*0.02;
     }
     
-    // Cap mine speed
-    const currentSpeed=Math.sqrt(m.vx*m.vx+m.vy*m.vy);
-    if(currentSpeed>m.speed){
-      m.vx=(m.vx/currentSpeed)*m.speed;
-      m.vy=(m.vy/currentSpeed)*m.speed;
+    // Apply velocity with speed limit
+    const currentSpeed=Math.sqrt(mine.vx*mine.vx+mine.vy*mine.vy);
+    if(currentSpeed>mine.speed){
+      mine.vx=(mine.vx/currentSpeed)*mine.speed;
+      mine.vy=(mine.vy/currentSpeed)*mine.speed;
     }
     
-    m.x+=m.vx;
-    m.y+=m.vy;
-  });
-  
-  // Update ring rotation
-  rings.forEach(ring=>{ring.rotation+=ring.speed;});
-  
-  // Collision: bullets vs ring segments
-  bullets.forEach(b=>{
-    rings.forEach(ring=>{
-      ring.segments.forEach(seg=>{
-        if(seg.hits<=0)return;
-        const segX=ring.x+Math.cos(ring.rotation+seg.angle)*ring.radius;
-        const segY=ring.y+Math.sin(ring.rotation+seg.angle)*ring.radius;
-        const dist=Math.sqrt((b.x-segX)**2+(b.y-segY)**2);
-        if(dist<ring.radius*0.35){
-          seg.hits--;
-          b.life=0; // Remove bullet
-          if(seg.hits<=0){
-            score+=10*level;
-            createExplosion(segX,segY,'#ff0',5);
-          }
-        }
-      });
-    });
-  });
-  
-  // Collision: mines vs player
-  mines.forEach(m=>{
-    const dist=Math.sqrt((player.x-m.x)**2+(player.y-m.y)**2);
-    if(dist<player.radius+m.radius){
+    // Update position
+    mine.x+=mine.vx;
+    mine.y+=mine.vy;
+    
+    // Check collision with player
+    const playerDist=Math.sqrt((mine.x-player.x)**2+(mine.y-player.y)**2);
+    if(playerDist<player.radius+mine.radius){
       lives--;
-      createExplosion(player.x,player.y,'#f00',20);
-      m.x=-1000; // Remove mine
-      if(lives<=0)state='gameover';
-    }
-  });
-  
-  // Collision: cannon bullets vs player
-  cannonBullets.forEach(b=>{
-    const dist=Math.sqrt((player.x-b.x)**2+(player.y-b.y)**2);
-    if(dist<player.radius+b.radius){
-      lives--;
-      createExplosion(player.x,player.y,'#f00',20);
-      b.x=-1000; // Remove bullet
-      if(lives<=0)state='gameover';
-    }
-  });
-  
-  // Update particles
-  particles.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.life--;});
-  particles=particles.filter(p=>p.life>0);
-  
-  // Update cannon (tracks player)
-  const dx=player.x-cannon.x;
-  const dy=player.y-cannon.y;
-  cannon.angle=Math.atan2(dy,dx);
-  
-  // Cannon fires when rings are breached (at least 6 segments destroyed)
-  const totalDestroyed=rings.reduce((sum,r)=>sum+r.segments.filter(s=>s.hits<=0).length,0);
-  if(totalDestroyed>=6&&!cannon.firing){
-    cannon.firing=true;
-    setTimeout(()=>{
-      if(cannon.health>0){
-        const speed=6+level;
-        cannonBullets.push({
-          x:cannon.x+Math.cos(cannon.angle)*25,
-          y:cannon.y+Math.sin(cannon.angle)*25,
-          vx:Math.cos(cannon.angle)*speed,
-          vy:Math.sin(cannon.angle)*speed,
-          radius:8
+      
+      // Add explosion particles
+      for(let p=0;p<20;p++){
+        particles.push({
+          x:player.x,y:player.y,
+          vx:(Math.random()-0.5)*6,
+          vy:(Math.random()-0.5)*6,
+          life:40,
+          color:'#f00'
         });
       }
-      cannon.firing=false;
-    },500+Math.random()*500);
+      
+      // Remove mine and respawn it
+      mines.splice(i,1);
+      spawnHomingMine();
+      
+      if(lives<=0){
+        gameState='gameover';
+      }else{
+        // Respawn player
+        player.x=W/2;
+        player.y=H-100;
+        player.vx=0;player.vy=0;player.angle=-Math.PI/2;
+      }
+    }
   }
   
-  // Ring regeneration check
-  if(!ringRegenerating&&rings[0].segments.every(s=>s.hits<=0)){
-    ringRegenerating=true;
-    regenTimer=120; // 2 seconds at 60fps
+  // Update particles
+  for(let i=particles.length-1;i>=0;i--){
+    const p=particles[i];
+    p.x+=p.vx;
+    p.y+=p.vy;
+    p.life--;
+    
+    if(p.life<=0){
+      particles.splice(i,1);
+    }
   }
   
+  // Update ring rotation
+  for(let r=0;r<rings.length;r++){
+    rings[r].rotation+=rings[r].speed;
+  }
+  
+  // Handle ring regeneration
   if(ringRegenerating){
     regenTimer--;
     if(regenTimer<=0){
-      // Regenerate: shift rings down, create new outer ring
-      rings.pop(); // Remove innermost (now empty)
-      const newRing={
-        x:cannon.x,
-        y:cannon.y,
-        radius:rings[rings.length-1].radius+50,
-        segments:[],
-        rotation:Math.random()*Math.PI*2,
-        speed:(rings.length%2===0?1:-1)*(0.008+level*0.002)
-      };
-      for(let j=0;j<12;j++){
-        newRing.segments.push({angle:j*(Math.PI*2/12),hits:2});
-      }
-      rings.unshift(newRing); // Add as new outer ring
-      
-      // Reset all segments to full health
-      rings.forEach(r=>r.segments.forEach(s=>s.hits=2));
-      
       ringRegenerating=false;
+      // Move middle ring to outer, inner to middle, create new core
+      const tempRing=rings[2]; // Inner ring becomes outer
+      rings[2]=rings[1]; // Middle becomes inner
+      rings[1]=rings[0]; // Outer becomes middle
+      rings[0]=tempRing; // Inner becomes outer
+      
+      // Reset segments for new outer ring
+      rings[0].segments=[];
+      for(let j=0;j<12;j++){
+        rings[0].segments.push({angle:j*(Math.PI*2/12),hits:2});
+      }
+      
+      // Reset middle ring segments
+      rings[1].segments=[];
+      for(let j=0;j<12;j++){
+        rings[1].segments.push({angle:j*(Math.PI*2/12),hits:2});
+      }
+      
+      // Reset inner ring segments
+      rings[2].segments=[];
+      for(let j=0;j<12;j++){
+        rings[2].segments.push({angle:j*(Math.PI*2/12),hits:2});
+      }
+      
+      // Increase level
+      level++;
+    }
+  }
+  
+  // Cannon fires when rings are breached (6+ segments destroyed)
+  if(!cannon.firing){
+    let totalDestroyed=0;
+    for(let r=0;r<rings.length;r++){
+      for(let s=0;s<rings[r].segments.length;s++){
+        if(rings[r].segments[s].hits<=0){
+          totalDestroyed++;
+        }
+      }
+    }
+    
+    if(totalDestroyed>=6){
+      cannon.firing=true;
+      
+      // Fire cannon ball at player
+      const angle=Math.atan2(player.y-cannon.y,player.x-cannon.x);
+      cannonBullets.push({
+        x:cannon.x+Math.cos(angle)*20,
+        y:cannon.y+Math.sin(angle)*20,
+        vx:Math.cos(angle)*5,
+        vy:Math.sin(angle)*5,
+        radius:4
+      });
+      
+      // Reset firing after delay
+      setTimeout(()=>{cannon.firing=false;},2000);
     }
   }
   
   // Update HUD
   document.getElementById('score').textContent='SCORE: '+score;
   document.getElementById('level').textContent='LEVEL: '+level;
-  let hearts='';for(let i=0;i<lives;i++)hearts+='♥ ';
-  document.getElementById('lives').textContent=hearts;
+  let livesText='';
+  for(let i=0;i<lives;i++)livesText+='♥ ';
+  document.getElementById('lives').textContent=livesText;
 }
 
-// Draw game with vector style
+// Draw game
 function draw(){
+  // Clear screen
   ctx.fillStyle='#000';
   ctx.fillRect(0,0,W,H);
   
-  if(state==='attract'){
+  // Draw attract screen
+  if(gameState==='attract'){
     ctx.fillStyle='#ff0';
-    ctx.font='bold 64px monospace';
+    ctx.font='bold 48px monospace';
     ctx.textAlign='center';
-    ctx.shadowColor='#ff0';
-    ctx.shadowBlur=20;
     ctx.fillText('STAR CASTLE',W/2,H/3);
-    ctx.shadowBlur=0;
+    
+    ctx.fillStyle='#0ff';
     ctx.font='24px monospace';
+    ctx.fillText('Asteroids-style controls',W/2,H/3+50);
+    
     ctx.fillStyle='#fff';
-    ctx.fillText('INSERT COIN',W/2,H/2);
+    ctx.font='16px monospace';
+    ctx.fillText('← → or A/D to rotate',W/2,H/3+100);
+    ctx.fillText('↑ or W to thrust',W/2,H/3+130);
+    ctx.fillText('SPACE or tap to fire',W/2,H/3+160);
+    
     return;
   }
   
-  if(state==='ready'){
-    ctx.fillStyle='#fff';
-    ctx.font='48px monospace';
-    ctx.textAlign='center';
-    ctx.fillText('STAR CASTLE',W/2,H/3);
-    return;
+  // Draw rings (wireframe style)
+  for(let r=0;r<rings.length;r++){
+    const ring=rings[r];
+    
+    // Draw ring segments
+    for(let s=0;s<ring.segments.length;s++){
+      const seg=ring.segments[s];
+      if(seg.hits<=0)continue;
+      
+      // Calculate segment position
+      const segX=ring.x+Math.cos(ring.rotation+seg.angle)*ring.radius;
+      const segY=ring.y+Math.sin(ring.rotation+seg.angle)*ring.radius;
+      
+      // Draw segment as line
+      const nextAngle=ring.rotation+((s+1)%ring.segments.length)*(Math.PI*2/ring.segments.length);
+      const nextX=ring.x+Math.cos(nextAngle)*ring.radius;
+      const nextY=ring.y+Math.sin(nextAngle)*ring.radius;
+      
+      ctx.strokeStyle=seg.hits===2?'#ff0':'#f80';
+      ctx.lineWidth=3;
+      ctx.beginPath();
+      ctx.moveTo(segX,segY);
+      ctx.lineTo(nextX,nextY);
+      ctx.stroke();
+    }
   }
   
-  // Draw rings (vector style - arc segments)
-  ctx.strokeStyle='#ff0';
-  ctx.lineWidth=2;
-  ctx.shadowColor='#ff0';
-  ctx.shadowBlur=10;
-  
-  rings.forEach(ring=>{
-    ring.segments.forEach(seg=>{
-      if(seg.hits>0){
-        const startAngle=ring.rotation+seg.angle-0.2;
-        const endAngle=ring.rotation+seg.angle+0.2;
-        ctx.beginPath();
-        ctx.arc(ring.x,ring.y,ring.radius,startAngle,endAngle);
-        ctx.stroke();
-      }
-    });
-  });
-  
-  // Draw cannon (vector style)
-  ctx.strokeStyle='#fff';
-  ctx.lineWidth=3;
-  ctx.shadowColor='#fff';
-  ctx.shadowBlur=15;
-  
-  ctx.save();
-  ctx.translate(cannon.x,cannon.y);
-  ctx.rotate(cannon.angle);
-  
-  // Cannon barrel
-  ctx.beginPath();
-  ctx.moveTo(0,0);
-  ctx.lineTo(25,0);
-  ctx.stroke();
-  
-  // Cannon base
-  ctx.beginPath();
-  ctx.arc(0,0,15,0,Math.PI*2);
-  ctx.stroke();
-  
-  // Health indicator
-  if(cannon.health>0){
-    ctx.fillStyle='#f00';
-    ctx.fillRect(-10,-25,20*(cannon.health/10),4);
-  }
-  
-  ctx.restore();
-  
-  // Draw mines (vector style - spinning triangles)
-  ctx.strokeStyle='#f00';
-  ctx.lineWidth=2;
-  ctx.shadowColor='#f00';
-  ctx.shadowBlur=10;
-  
-  mines.forEach(m=>{
-    if(m.x<-50||m.x>W+50||m.y<-50||m.y>H+50)return;
-    ctx.save();
-    ctx.translate(m.x,m.y);
-    const rot=Math.atan2(m.vy,m.vx)+Math.PI/2;
-    ctx.rotate(rot);
-    
-    // Triangle mine
-    ctx.beginPath();
-    ctx.moveTo(0,-m.radius);
-    ctx.lineTo(-m.radius*0.7,m.radius*0.7);
-    ctx.lineTo(m.radius*0.7,m.radius*0.7);
-    ctx.closePath();
-    ctx.stroke();
-    
-    // Inner glow
-    ctx.fillStyle='rgba(255,0,0,0.3)';
-    ctx.fill();
-    
-    ctx.restore();
-  });
-  
-  // Draw bullets (vector style - small dots)
+  // Draw cannon (wireframe style)
   ctx.strokeStyle='#0ff';
-  ctx.lineWidth=2;
-  ctx.shadowColor='#0ff';
-  ctx.shadowBlur=8;
-  
-  bullets.forEach(b=>{
-    ctx.beginPath();
-    ctx.arc(b.x,b.y,b.radius,0,Math.PI*2);
-    ctx.stroke();
-  });
-  
-  // Draw cannon bullets (vector style - larger glowing orbs)
-  ctx.strokeStyle='#f80';
   ctx.lineWidth=3;
-  ctx.shadowColor='#f80';
-  ctx.shadowBlur=15;
   
-  cannonBullets.forEach(b=>{
-    ctx.beginPath();
-    ctx.arc(b.x,b.y,b.radius,0,Math.PI*2);
-    ctx.stroke();
-    
-    // Inner glow
-    ctx.fillStyle='rgba(255,128,0,0.4)';
-    ctx.fill();
-  });
+  // Draw cannon body
+  const cannonAngle=Math.atan2(player.y-cannon.y,player.x-cannon.x);
+  ctx.beginPath();
+  ctx.arc(cannon.x,cannon.y,20,0,Math.PI*2);
+  ctx.stroke();
   
-  // Draw player (vector style - triangle outline)
+  // Draw cannon barrel
+  ctx.beginPath();
+  ctx.moveTo(cannon.x,cannon.y);
+  ctx.lineTo(cannon.x+Math.cos(cannonAngle)*30,cannon.y+Math.sin(cannonAngle)*30);
+  ctx.stroke();
+  
+  // Draw cannon health bar
+  const healthWidth=40;
+  const healthHeight=6;
+  ctx.fillStyle='#333';
+  ctx.fillRect(cannon.x-healthWidth/2,cannon.y-40,healthWidth,healthHeight);
+  ctx.fillStyle=cannon.health>5?'#0f0':'#f00';
+  ctx.fillRect(cannon.x-healthWidth/2,cannon.y-40,healthWidth*(cannon.health/10),healthHeight);
+  
+  // Draw player ship (wireframe triangle)
   ctx.strokeStyle='#0f0';
   ctx.lineWidth=2;
-  ctx.shadowColor='#0f0';
-  ctx.shadowBlur=12;
-  
-  ctx.save();
-  ctx.translate(player.x,player.y);
-  ctx.rotate(player.angle+Math.PI/2);
-  
-  // Ship triangle
   ctx.beginPath();
-  ctx.moveTo(0,-player.radius*1.5);
-  ctx.lineTo(-player.radius,player.radius);
-  ctx.lineTo(player.radius,player.radius);
+  
+  // Ship points based on angle
+  const noseX=player.x+Math.cos(player.angle)*15;
+  const noseY=player.y+Math.sin(player.angle)*15;
+  const leftX=player.x+Math.cos(player.angle+2.5)*10;
+  const leftY=player.y+Math.sin(player.angle+2.5)*10;
+  const rightX=player.x+Math.cos(player.angle-2.5)*10;
+  const rightY=player.y+Math.sin(player.angle-2.5)*10;
+  
+  ctx.moveTo(noseX,noseY);
+  ctx.lineTo(leftX,leftY);
+  ctx.lineTo(rightX,rightY);
   ctx.closePath();
   ctx.stroke();
   
-  // Engine glow when thrusting
-  if(player.vx*Math.cos(player.angle)+player.vy*Math.sin(player.angle)>0){
-    ctx.fillStyle='rgba(0,255,0,0.3)';
+  // Draw engine glow when thrusting
+  if((keys['ArrowUp']||keys['w']||touchInput.thrust)&&gameState==='playing'){
+    ctx.fillStyle='rgba(0,255,255,0.3)';
+    ctx.beginPath();
+    const tailX=player.x-Math.cos(player.angle)*12;
+    const tailY=player.y-Math.sin(player.angle)*12;
+    ctx.arc(tailX,tailY,8,0,Math.PI*2);
     ctx.fill();
   }
   
-  ctx.restore();
-  
-  // Draw particles (explosions)
-  particles.forEach(p=>{
-    ctx.strokeStyle=p.color;
-    ctx.lineWidth=2;
-    ctx.shadowColor=p.color;
-    ctx.shadowBlur=8;
-    ctx.globalAlpha=p.life/50;
-    
-    ctx.beginPath();
-    ctx.arc(p.x,p.y,p.size*(p.life/50),0,Math.PI*2);
-    ctx.stroke();
-    
-    ctx.globalAlpha=1;
-  });
-  
-  // Ring regeneration effect
-  if(ringRegenerating){
+  // Draw bullets (cyan lines)
+  for(let i=0;i<bullets.length;i++){
+    const b=bullets[i];
     ctx.strokeStyle='#0ff';
-    ctx.lineWidth=3;
-    ctx.shadowColor='#0ff';
-    ctx.shadowBlur=20;
-    
-    const progress=1-(regenTimer/120);
+    ctx.lineWidth=2;
     ctx.beginPath();
-    ctx.arc(cannon.x,cannon.y,50+progress*100,0,Math.PI*2*progress);
+    ctx.moveTo(b.x,b.y);
+    ctx.lineTo(b.x-b.vx*2,b.y-b.vy*2);
     ctx.stroke();
   }
   
-  if(state==='gameover'){
-    ctx.fillStyle='rgba(0,0,0,0.7)';
-    ctx.fillRect(0,0,W,H);
-    
-    ctx.fillStyle='#f00';
-    ctx.font='bold 64px monospace';
-    ctx.textAlign='center';
-    ctx.shadowColor='#f00';
-    ctx.shadowBlur=20;
-    ctx.fillText('GAME OVER',W/2,H/2-50);
-    
-    ctx.fillStyle='#fff';
-    ctx.font='32px monospace';
-    ctx.shadowBlur=0;
-    ctx.fillText('SCORE: '+score,W/2,H/2+10);
-    
-    ctx.font='24px monospace';
-    ctx.fillText('Tap to restart',W/2,H/2+60);
+  // Draw cannon bullets (orange lines)
+  for(let i=0;i<cannonBullets.length;i++){
+    const b=cannonBullets[i];
+    ctx.strokeStyle='#f80';
+    ctx.lineWidth=2;
+    ctx.beginPath();
+    ctx.moveTo(b.x,b.y);
+    ctx.lineTo(b.x-b.vx*2,b.y-b.vy*2);
+    ctx.stroke();
   }
+  
+  // Draw mines (red spinning triangles)
+  for(let i=0;i<mines.length;i++){
+    const mine=mines[i];
+    ctx.strokeStyle='#f00';
+    ctx.lineWidth=2;
+    
+    // Draw triangle that rotates based on position
+    const mineAngle=Math.atan2(mine.vy,mine.vx)+Math.PI/2;
+    ctx.beginPath();
+    
+    const triSize=8;
+    for(let j=0;j<3;j++){
+      const angle=mineAngle+j*(Math.PI*2/3);
+      const x=mine.x+Math.cos(angle)*triSize;
+      const y=mine.y+Math.sin(angle)*triSize;
+      
+      if(j===0){
+        ctx.moveTo(x,y);
+      }else{
+        ctx.lineTo(x,y);
+      }
+    }
+    ctx.closePath();
+    ctx.stroke();
+  }
+  
+  // Draw particles
+  for(let i=0;i<particles.length;i++){
+    const p=particles[i];
+    ctx.fillStyle=p.color;
+    ctx.globalAlpha=p.life/40;
+    ctx.fillRect(p.x-1,p.y-1,2,2);
+  }
+  ctx.globalAlpha=1;
+  
+  // Draw touch controls overlay (Asteroids style)
+  drawTouchControls();
 }
 
-// Game loop
-function loop(){
-  update();
-  draw();
-  requestAnimationFrame(loop);
-}
-
-// Input handling - keyboard
-window.addEventListener('keydown',e=>{
-  keys[e.key]=true;
-  if(e.key===' '&&state==='playing'){
-    shoot();
-  }
-});
-window.addEventListener('keyup',e=>{keys[e.key]=false;});
-
-// Touch controls for mobile - simple Asteroids style
-let touchControls={left:false,right:false,thrust:false,fire:false};
-
-canvas.addEventListener('touchstart',e=>{
-  e.preventDefault();
-  if(state==='attract'||state==='ready'){
-    startGame();
-    return;
-  }
-  if(state==='gameover'){
-    restartGame();
-    return;
-  }
-  
-  for(let i=0;i<e.touches.length;i++){
-    const touch=e.touches[i];
-    
-    // Left side: rotate left
-    if(touch.clientX<W/3){
-      touchControls.left=true;
-    }
-    
-    // Right side: rotate right + thrust + fire
-    if(touch.clientX>W*2/3){
-      touchControls.right=true;
-      touchControls.thrust=true;
-      touchControls.fire=true;
-    }
-    
-    // Center: thrust + fire
-    if(touch.clientX>=W/3&&touch.clientX<=W*2/3){
-      touchControls.thrust=true;
-      touchControls.fire=true;
-    }
-  }
-},{passive:false});
-
-canvas.addEventListener('touchmove',e=>{
-  e.preventDefault();
-},{passive:false});
-
-canvas.addEventListener('touchend',e=>{
-  e.preventDefault();
-  if(state!=='playing')return;
-  
-  // Reset all controls on touch end
-  touchControls={left:false,right:false,thrust:false,fire:false};
-  
-  // Re-check remaining touches
-  for(let i=0;i<e.touches.length;i++){
-    const touch=e.touches[i];
-    
-    if(touch.clientX<W/3){
-      touchControls.left=true;
-    }
-    
-    if(touch.clientX>W*2/3){
-      touchControls.right=true;
-      touchControls.thrust=true;
-    }
-    
-    if(touch.clientX>=W/3&&touch.clientX<=W*2/3){
-      touchControls.thrust=true;
-    }
-  }
-},{passive:false});
-
-// Draw touch controls overlay (Asteroids style)
+// Draw Asteroids-style touch controls
 function drawTouchControls(){
-  if(state!=='playing')return;
+  if(gameState!=='playing')return;
   
-  // Left rotate button (large area)
-  ctx.fillStyle='rgba(255,255,255,0.05)';
-  ctx.fillRect(0,H*0.6,W/3,H*0.4);
+  const btnSize=50;
+  const padding=20;
   
-  // Right rotate button (large area)
-  ctx.fillStyle='rgba(255,255,255,0.05)';
-  ctx.fillRect(W*2/3,H*0.6,W/3,H*0.4);
+  // Left button (rotate left)
+  ctx.fillStyle=touchInput.left?'rgba(255,255,255,0.3)':'rgba(255,255,255,0.1)';
+  ctx.strokeStyle='rgba(255,255,255,0.5)';
+  ctx.lineWidth=2;
   
-  // Center thrust button (large area)
-  ctx.fillStyle='rgba(255,255,255,0.08)';
-  ctx.fillRect(W/3,H*0.6,W/3,H*0.4);
+  // Left arrow button (bottom left)
+  const leftX=padding+btnSize/2;
+  const leftY=H-padding-btnSize/2;
+  ctx.beginPath();
+  ctx.arc(leftX,leftY,btnSize/2,0,Math.PI*2);
+  ctx.fill();
+  ctx.stroke();
   
-  // Labels
-  ctx.fillStyle='rgba(255,255,255,0.4)';
-  ctx.font='bold 16px monospace';
-  ctx.textAlign='center';
+  // Draw left arrow
+  ctx.strokeStyle='rgba(255,255,255,0.8)';
+  ctx.lineWidth=3;
+  ctx.beginPath();
+  ctx.moveTo(leftX-10,leftY);
+  ctx.lineTo(leftX+5,leftY-8);
+  ctx.moveTo(leftX+5,leftY-8);
+  ctx.lineTo(leftX+5,leftY+8);
+  ctx.moveTo(leftX+5,leftY+8);
+  ctx.lineTo(leftX-10,leftY);
+  ctx.stroke();
   
-  // Left arrow
-  ctx.fillText('◀',W/6,H*0.75);
+  // Right button (rotate right)
+  const rightX=W-padding-btnSize/2;
+  const rightY=H-padding-btnSize/2;
+  ctx.fillStyle=touchInput.right?'rgba(255,255,255,0.3)':'rgba(255,255,255,0.1)';
+  ctx.beginPath();
+  ctx.arc(rightX,rightY,btnSize/2,0,Math.PI*2);
+  ctx.fill();
+  ctx.stroke();
   
-  // Right arrow
-  ctx.fillText('▶',W*5/6,H*0.75);
+  // Draw right arrow
+  ctx.strokeStyle='rgba(255,255,255,0.8)';
+  ctx.lineWidth=3;
+  ctx.beginPath();
+  ctx.moveTo(rightX+10,rightY);
+  ctx.lineTo(rightX-5,rightY-8);
+  ctx.moveTo(rightX-5,rightY-8);
+  ctx.lineTo(rightX-5,rightY+8);
+  ctx.moveTo(rightX-5,rightY+8);
+  ctx.lineTo(rightX+10,rightY);
+  ctx.stroke();
   
-  // Center thrust indicator
-  if(touchControls.thrust){
-    ctx.fillStyle='rgba(0,255,0,0.3)';
-    ctx.beginPath();
-    ctx.moveTo(W/2,H*0.65);
-    ctx.lineTo(W/2-15,H*0.85);
-    ctx.lineTo(W/2+15,H*0.85);
-    ctx.closePath();
-    ctx.fill();
-  }else{
-    ctx.strokeStyle='rgba(0,255,0,0.4)';
-    ctx.lineWidth=2;
-    ctx.beginPath();
-    ctx.moveTo(W/2,H*0.65);
-    ctx.lineTo(W/2-15,H*0.85);
-    ctx.lineTo(W/2+15,H*0.85);
-    ctx.closePath();
-    ctx.stroke();
-  }
+  // Thrust button (top center)
+  const thrustX=W/2;
+  const thrustY=padding+btnSize/2;
+  ctx.fillStyle=touchInput.thrust?'rgba(0,255,255,0.3)':'rgba(0,255,255,0.1)';
+  ctx.beginPath();
+  ctx.arc(thrustX,thrustY,btnSize/2,0,Math.PI*2);
+  ctx.fill();
+  ctx.stroke();
   
-  // Fire indicator (top right)
-  if(touchControls.fire){
-    ctx.fillStyle='rgba(255,0,0,0.4)';
-    ctx.beginPath();
-    ctx.arc(W*0.85,H*0.15,25,0,Math.PI*2);
-    ctx.fill();
-  }else{
-    ctx.strokeStyle='rgba(255,0,0,0.4)';
-    ctx.lineWidth=2;
-    ctx.beginPath();
-    ctx.arc(W*0.85,H*0.15,25,0,Math.PI*2);
-    ctx.stroke();
-  }
+  // Draw thrust arrow (up)
+  ctx.strokeStyle='rgba(0,255,255,0.8)';
+  ctx.lineWidth=3;
+  ctx.beginPath();
+  ctx.moveTo(thrustX,thrustY+10);
+  ctx.lineTo(thrustX,thrustY-5);
+  ctx.moveTo(thrustX,thrustY-5);
+  ctx.lineTo(thrustX-8,rightY+10);
+  ctx.moveTo(thrustX,thrustY-5);
+  ctx.lineTo(thrustX+8,rightY+10);
+  ctx.stroke();
+  
+  // Fire button (bottom right)
+  const fireX=W-padding-btnSize/2;
+  const fireY=H-padding-btnSize/2+btnSize+10;
+  ctx.fillStyle='rgba(255,0,0,0.3)';
+  ctx.beginPath();
+  ctx.arc(fireX,fireY,btnSize/2,0,Math.PI*2);
+  ctx.fill();
+  ctx.stroke();
   
   // Fire label
   ctx.fillStyle='rgba(255,255,255,0.4)';
   ctx.font='12px monospace';
-  ctx.fillText('FIRE',W*0.85,H*0.15+4);
+  ctx.textAlign='center';
+  ctx.fillText('FIRE',fireX,fireY+4);
 }
 
 // Game loop
 function loop(){
   update();
   draw();
-  drawTouchControls();
   requestAnimationFrame(loop);
 }
 
-// Start/restart game
-function startGame(){
-  state='playing';
+// Start/restart game - make global so click handler can access it
+window.startGame = function(){
+  gameState='playing';
   score=0;lives=3;level=1;
   player.x=W/2;player.y=H-100;
   player.vx=0;player.vy=0;player.angle=-Math.PI/2;
@@ -680,17 +666,17 @@ function startGame(){
   initRings();
   initMines();
   document.getElementById('startBtn').style.display='none';
-}
+};
 
-function restartGame(){
-  startGame();
-}
+window.restartGame = function(){
+  window.startGame();
+};
 
 document.getElementById('startBtn').addEventListener('click',()=>{
-  if(state==='attract'||state==='ready'){
-    startGame();
+  if(gameState==='attract'||gameState==='ready'){
+    window.startGame();
   }else{
-    restartGame();
+    window.restartGame();
   }
 });
 
