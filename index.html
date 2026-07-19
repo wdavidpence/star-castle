@@ -5,12 +5,13 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1,user-scalable=no">
 <title>Star Castle</title>
 <style>
-body{margin:0;background:#000;color:#fff;font-family:monospace;overflow:hidden}
+body{margin:0;background:#000;color:#fff;font-family:'Courier New',monospace;overflow:hidden}
 canvas{display:block;width:100vw;height:100vh}
-#startBtn{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);padding:20px 40px;font-size:24px;background:#1a3a5c;border:2px solid #4af;color:#fff;cursor:pointer;border-radius:8px;z-index:10}
-#startBtn:hover{background:#2a5a8c}
-.hud{position:absolute;top:10px;left:10px;right:10px;display:flex;justify-content:space-between;font-size:18px;z-index:5}
+#startBtn{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);padding:20px 40px;font-size:28px;background:#000;border:3px solid #ff0;color:#ff0;cursor:pointer;font-family:'Courier New',monospace;text-transform:uppercase;z-index:10}
+#startBtn:hover{background:#1a1a00;box-shadow:0 0 20px #ff0}
+.hud{position:absolute;top:15px;left:15px;right:15px;display:flex;justify-content:space-between;font-size:20px;z-index:5;text-shadow:0 0 10px currentColor}
 #score{color:#ff0}
+#level{color:#0ff}
 #lives{color:#f00}
 </style>
 </head>
@@ -18,9 +19,10 @@ canvas{display:block;width:100vw;height:100vh}
 <canvas id="game"></canvas>
 <div class="hud">
   <div id="score">SCORE: 0</div>
+  <div id="level">LEVEL: 1</div>
   <div id="lives"></div>
 </div>
-<button id="startBtn">TAP TO START</button>
+<button id="startBtn">INSERT COIN</button>
 <script>
 const canvas=document.getElementById('game');
 const ctx=canvas.getContext('2d');
@@ -31,82 +33,161 @@ resize();
 window.addEventListener('resize',resize);
 
 // Game state
-let state='ready';
-let player={x:W/2,y:H-100,vx:0,vy:0,radius:15};
-let cannon={x:W/2,y:H/3,angle:0,firing:false};
+let state='attract';
+let player={x:0,y:0,vx:0,vy:0,angle:-Math.PI/2,speed:0,radius:12};
+let cannon={x:0,y:0,angle:0,firing:false,health:10};
 let rings=[];
 let mines=[];
 let bullets=[];
 let cannonBullets=[];
+let particles=[];
 let score=0;
 let lives=3;
+let level=1;
+let ringRegenerating=false;
+let regenTimer=0;
 
-// Input state - declared BEFORE use
+// Input state
 const keys={};
+const touchInput={left:false,right:false,fire:false,thrust:false};
 
 // Initialize rings with proper positions
 function initRings(){
   rings=[];
+  const centerX=W/2, centerY=H/3;
   for(let i=0;i<3;i++){
     const ring={
-      x:W/2,
-      y:H/3,
-      radius:150+i*60,
+      x:centerX,
+      y:centerY,
+      radius:120+i*50,
       segments:[],
       rotation:Math.random()*Math.PI*2,
-      speed:(i%2===0?1:-1)*0.01
+      speed:(i%2===0?1:-1)*(0.008+level*0.002)
     };
     for(let j=0;j<12;j++){
-      ring.segments.push({angle:j*(Math.PI*2/12),hits:3});
+      ring.segments.push({angle:j*(Math.PI*2/12),hits:2});
     }
     rings.push(ring);
   }
 }
 
-// Spawn mine
-function spawnMine(){
+// Spawn homing mine from cannon
+function spawnHomingMine(){
+  const angle=Math.random()*Math.PI*2;
   mines.push({
-    x:Math.random()*W,
-    y:-20,
-    vx:(Math.random()-0.5)*2,
-    vy:1+Math.random()*2,
-    radius:8
+    x:cannon.x+Math.cos(angle)*30,
+    y:cannon.y+Math.sin(angle)*30,
+    vx:Math.cos(angle)*1.5,
+    vy:Math.sin(angle)*1.5,
+    radius:6,
+    speed:2+level*0.3,
+    tracking:false
   });
 }
 
-// Shoot bullet from player
+// Initialize mines (exactly 3)
+function initMines(){
+  mines=[];
+  for(let i=0;i<3;i++){
+    spawnHomingMine();
+  }
+}
+
+// Shoot bullet from player (in direction of ship)
 function shoot(){
+  const speed=10;
   bullets.push({
-    x:player.x,
-    y:player.y-20,
-    vx:(Math.random()-0.5)*3,
-    vy:-8,
-    radius:4
+    x:player.x+Math.cos(player.angle)*20,
+    y:player.y+Math.sin(player.angle)*20,
+    vx:Math.cos(player.angle)*speed,
+    vy:Math.sin(player.angle)*speed,
+    radius:3,
+    life:60
   });
+}
+
+// Create explosion particles
+function createExplosion(x,y,color,count){
+  for(let i=0;i<count;i++){
+    const angle=Math.random()*Math.PI*2;
+    const speed=1+Math.random()*3;
+    particles.push({
+      x:x,
+      y:y,
+      vx:Math.cos(angle)*speed,
+      vy:Math.sin(angle)*speed,
+      life:30+Math.random()*20,
+      color:color,
+      size:2+Math.random()*3
+    });
+  }
 }
 
 // Update game
 function update(){
   if(state!=='playing')return;
   
-  // Player movement (keyboard)
-  if(keys['ArrowLeft'])player.x-=5;
-  if(keys['ArrowRight'])player.x+=5;
-  if(player.x<0)player.x=0;
-  if(player.x>W)player.x=W;
+  // Player rotation (keyboard)
+  if(keys['ArrowLeft']||keys['a'])player.angle-=0.06;
+  if(keys['ArrowRight']||keys['d'])player.angle+=0.06;
+  
+  // Player thrust (keyboard)
+  if(keys['ArrowUp']||keys['w']){
+    player.vx+=Math.cos(player.angle)*0.15;
+    player.vy+=Math.sin(player.angle)*0.15;
+  }
+  
+  // Touch controls
+  if(touchInput.left)player.angle-=0.05;
+  if(touchInput.right)player.angle+=0.05;
+  if(touchInput.thrust){
+    player.vx+=Math.cos(player.angle)*0.12;
+    player.vy+=Math.sin(player.angle)*0.12;
+  }
+  
+  // Apply friction/drag
+  player.vx*=0.98;
+  player.vy*=0.98;
+  
+  // Update player position
+  player.x+=player.vx;
+  player.y+=player.vy;
+  
+  // Wrap around screen edges
+  if(player.x<0)player.x=W;
+  if(player.x>W)player.x=0;
+  if(player.y<0)player.y=H;
+  if(player.y>H)player.y=0;
   
   // Update bullets
-  bullets.forEach(b=>{b.y+=b.vy;b.x+=b.vx;});
-  bullets=bullets.filter(b=>b.y>-50);
+  bullets.forEach(b=>{b.x+=b.vx;b.y+=b.vy;b.life--;});
+  bullets=bullets.filter(b=>b.life>0&&b.x>-50&&b.x<W+50&&b.y>-50&&b.y<H+50);
   
   // Update cannon bullets
   cannonBullets.forEach(b=>{b.x+=b.vx;b.y+=b.vy;});
-  cannonBullets=cannonBullets.filter(b=>b.x>0&&b.x<W&&b.y>0&&b.y<H);
+  cannonBullets=cannonBullets.filter(b=>b.x>-50&&b.x<W+50&&b.y>-50&&b.y<H+50);
   
-  // Update mines (spawn rate reduced from 0.02 to 0.005)
-  if(Math.random()<0.005 && mines.length<10)spawnMine();
-  mines.forEach(m=>{m.y+=m.vy;m.x+=m.vx;});
-  mines=mines.filter(m=>m.y<H+50);
+  // Update homing mines (track player)
+  mines.forEach(m=>{
+    const dx=player.x-m.x;
+    const dy=player.y-m.y;
+    const dist=Math.sqrt(dx*dx+dy*dy);
+    
+    if(dist>0){
+      m.vx+=(dx/dist)*m.speed*0.02;
+      m.vy+=(dy/dist)*m.speed*0.02;
+    }
+    
+    // Cap mine speed
+    const currentSpeed=Math.sqrt(m.vx*m.vx+m.vy*m.vy);
+    if(currentSpeed>m.speed){
+      m.vx=(m.vx/currentSpeed)*m.speed;
+      m.vy=(m.vy/currentSpeed)*m.speed;
+    }
+    
+    m.x+=m.vx;
+    m.y+=m.vy;
+  });
   
   // Update ring rotation
   rings.forEach(ring=>{ring.rotation+=ring.speed;});
@@ -119,9 +200,13 @@ function update(){
         const segX=ring.x+Math.cos(ring.rotation+seg.angle)*ring.radius;
         const segY=ring.y+Math.sin(ring.rotation+seg.angle)*ring.radius;
         const dist=Math.sqrt((b.x-segX)**2+(b.y-segY)**2);
-        if(dist<ring.radius*0.3){
+        if(dist<ring.radius*0.35){
           seg.hits--;
-          b.y=-100; // Remove bullet
+          b.life=0; // Remove bullet
+          if(seg.hits<=0){
+            score+=10*level;
+            createExplosion(segX,segY,'#ff0',5);
+          }
         }
       });
     });
@@ -132,7 +217,8 @@ function update(){
     const dist=Math.sqrt((player.x-m.x)**2+(player.y-m.y)**2);
     if(dist<player.radius+m.radius){
       lives--;
-      m.y=H+100; // Remove mine
+      createExplosion(player.x,player.y,'#f00',20);
+      m.x=-1000; // Remove mine
       if(lives<=0)state='gameover';
     }
   });
@@ -142,48 +228,96 @@ function update(){
     const dist=Math.sqrt((player.x-b.x)**2+(player.y-b.y)**2);
     if(dist<player.radius+b.radius){
       lives--;
-      b.x=-100; // Remove bullet
+      createExplosion(player.x,player.y,'#f00',20);
+      b.x=-1000; // Remove bullet
       if(lives<=0)state='gameover';
     }
   });
+  
+  // Update particles
+  particles.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.life--;});
+  particles=particles.filter(p=>p.life>0);
   
   // Update cannon (tracks player)
   const dx=player.x-cannon.x;
   const dy=player.y-cannon.y;
   cannon.angle=Math.atan2(dy,dx);
   
-  // Cannon fires when rings are destroyed
-  const allDestroyed=rings.every(r=>r.segments.every(s=>s.hits<=0));
-  if(allDestroyed&&!cannon.firing){
+  // Cannon fires when rings are breached (at least 6 segments destroyed)
+  const totalDestroyed=rings.reduce((sum,r)=>sum+r.segments.filter(s=>s.hits<=0).length,0);
+  if(totalDestroyed>=6&&!cannon.firing){
     cannon.firing=true;
-    // Fire 3 bullets at player
-    for(let i=0;i<3;i++){
-      setTimeout(()=>{
-        if(cannon.firing){
-          const speed=5;
-          cannonBullets.push({
-            x:cannon.x,
-            y:cannon.y,
-            vx:Math.cos(cannon.angle)*speed,
-            vy:Math.sin(cannon.angle)*speed,
-            radius:5
-          });
-        }
-      },i*300);
+    setTimeout(()=>{
+      if(cannon.health>0){
+        const speed=6+level;
+        cannonBullets.push({
+          x:cannon.x+Math.cos(cannon.angle)*25,
+          y:cannon.y+Math.sin(cannon.angle)*25,
+          vx:Math.cos(cannon.angle)*speed,
+          vy:Math.sin(cannon.angle)*speed,
+          radius:8
+        });
+      }
+      cannon.firing=false;
+    },500+Math.random()*500);
+  }
+  
+  // Ring regeneration check
+  if(!ringRegenerating&&rings[0].segments.every(s=>s.hits<=0)){
+    ringRegenerating=true;
+    regenTimer=120; // 2 seconds at 60fps
+  }
+  
+  if(ringRegenerating){
+    regenTimer--;
+    if(regenTimer<=0){
+      // Regenerate: shift rings down, create new outer ring
+      rings.pop(); // Remove innermost (now empty)
+      const newRing={
+        x:cannon.x,
+        y:cannon.y,
+        radius:rings[rings.length-1].radius+50,
+        segments:[],
+        rotation:Math.random()*Math.PI*2,
+        speed:(rings.length%2===0?1:-1)*(0.008+level*0.002)
+      };
+      for(let j=0;j<12;j++){
+        newRing.segments.push({angle:j*(Math.PI*2/12),hits:2});
+      }
+      rings.unshift(newRing); // Add as new outer ring
+      
+      // Reset all segments to full health
+      rings.forEach(r=>r.segments.forEach(s=>s.hits=2));
+      
+      ringRegenerating=false;
     }
-    setTimeout(()=>{cannon.firing=false;},1500);
   }
   
   // Update HUD
   document.getElementById('score').textContent='SCORE: '+score;
+  document.getElementById('level').textContent='LEVEL: '+level;
   let hearts='';for(let i=0;i<lives;i++)hearts+='♥ ';
   document.getElementById('lives').textContent=hearts;
 }
 
-// Draw game
+// Draw game with vector style
 function draw(){
   ctx.fillStyle='#000';
   ctx.fillRect(0,0,W,H);
+  
+  if(state==='attract'){
+    ctx.fillStyle='#ff0';
+    ctx.font='bold 64px monospace';
+    ctx.textAlign='center';
+    ctx.shadowColor='#ff0';
+    ctx.shadowBlur=20;
+    ctx.fillText('STAR CASTLE',W/2,H/3);
+    ctx.shadowBlur=0;
+    ctx.font='24px monospace';
+    ctx.fillStyle='#fff';
+    ctx.fillText('INSERT COIN',W/2,H/2);
+    return;
+  }
   
   if(state==='ready'){
     ctx.fillStyle='#fff';
@@ -193,72 +327,181 @@ function draw(){
     return;
   }
   
-  // Draw rings
+  // Draw rings (vector style - arc segments)
+  ctx.strokeStyle='#ff0';
+  ctx.lineWidth=2;
+  ctx.shadowColor='#ff0';
+  ctx.shadowBlur=10;
+  
   rings.forEach(ring=>{
-    ctx.strokeStyle='#ff0';
-    ctx.lineWidth=3;
     ring.segments.forEach(seg=>{
       if(seg.hits>0){
-        const x=ring.x+Math.cos(ring.rotation+seg.angle)*ring.radius;
-        const y=ring.y+Math.sin(ring.rotation+seg.angle)*ring.radius;
+        const startAngle=ring.rotation+seg.angle-0.2;
+        const endAngle=ring.rotation+seg.angle+0.2;
         ctx.beginPath();
-        ctx.arc(x,y,10,0,Math.PI*2);
+        ctx.arc(ring.x,ring.y,ring.radius,startAngle,endAngle);
         ctx.stroke();
       }
     });
   });
   
-  // Draw cannon
+  // Draw cannon (vector style)
+  ctx.strokeStyle='#fff';
+  ctx.lineWidth=3;
+  ctx.shadowColor='#fff';
+  ctx.shadowBlur=15;
+  
   ctx.save();
   ctx.translate(cannon.x,cannon.y);
   ctx.rotate(cannon.angle);
-  ctx.fillStyle='#fff';
-  ctx.fillRect(-20,-5,40,10);
+  
+  // Cannon barrel
+  ctx.beginPath();
+  ctx.moveTo(0,0);
+  ctx.lineTo(25,0);
+  ctx.stroke();
+  
+  // Cannon base
+  ctx.beginPath();
+  ctx.arc(0,0,15,0,Math.PI*2);
+  ctx.stroke();
+  
+  // Health indicator
+  if(cannon.health>0){
+    ctx.fillStyle='#f00';
+    ctx.fillRect(-10,-25,20*(cannon.health/10),4);
+  }
+  
   ctx.restore();
   
-  // Draw mines
-  ctx.fillStyle='#f00';
+  // Draw mines (vector style - spinning triangles)
+  ctx.strokeStyle='#f00';
+  ctx.lineWidth=2;
+  ctx.shadowColor='#f00';
+  ctx.shadowBlur=10;
+  
   mines.forEach(m=>{
+    if(m.x<-50||m.x>W+50||m.y<-50||m.y>H+50)return;
+    ctx.save();
+    ctx.translate(m.x,m.y);
+    const rot=Math.atan2(m.vy,m.vx)+Math.PI/2;
+    ctx.rotate(rot);
+    
+    // Triangle mine
     ctx.beginPath();
-    ctx.arc(m.x,m.y,m.radius,0,Math.PI*2);
+    ctx.moveTo(0,-m.radius);
+    ctx.lineTo(-m.radius*0.7,m.radius*0.7);
+    ctx.lineTo(m.radius*0.7,m.radius*0.7);
+    ctx.closePath();
+    ctx.stroke();
+    
+    // Inner glow
+    ctx.fillStyle='rgba(255,0,0,0.3)';
     ctx.fill();
+    
+    ctx.restore();
   });
   
-  // Draw bullets
-  ctx.fillStyle='#0ff';
+  // Draw bullets (vector style - small dots)
+  ctx.strokeStyle='#0ff';
+  ctx.lineWidth=2;
+  ctx.shadowColor='#0ff';
+  ctx.shadowBlur=8;
+  
   bullets.forEach(b=>{
     ctx.beginPath();
     ctx.arc(b.x,b.y,b.radius,0,Math.PI*2);
-    ctx.fill();
+    ctx.stroke();
   });
   
-  // Draw cannon bullets
-  ctx.fillStyle='#f80';
+  // Draw cannon bullets (vector style - larger glowing orbs)
+  ctx.strokeStyle='#f80';
+  ctx.lineWidth=3;
+  ctx.shadowColor='#f80';
+  ctx.shadowBlur=15;
+  
   cannonBullets.forEach(b=>{
     ctx.beginPath();
     ctx.arc(b.x,b.y,b.radius,0,Math.PI*2);
+    ctx.stroke();
+    
+    // Inner glow
+    ctx.fillStyle='rgba(255,128,0,0.4)';
     ctx.fill();
   });
   
-  // Draw player
-  ctx.fillStyle='#0f0';
+  // Draw player (vector style - triangle outline)
+  ctx.strokeStyle='#0f0';
+  ctx.lineWidth=2;
+  ctx.shadowColor='#0f0';
+  ctx.shadowBlur=12;
+  
+  ctx.save();
+  ctx.translate(player.x,player.y);
+  ctx.rotate(player.angle+Math.PI/2);
+  
+  // Ship triangle
   ctx.beginPath();
-  ctx.moveTo(player.x,player.y-20);
-  ctx.lineTo(player.x-15,player.y+15);
-  ctx.lineTo(player.x+15,player.y+15);
+  ctx.moveTo(0,-player.radius*1.5);
+  ctx.lineTo(-player.radius,player.radius);
+  ctx.lineTo(player.radius,player.radius);
   ctx.closePath();
-  ctx.fill();
+  ctx.stroke();
+  
+  // Engine glow when thrusting
+  if(player.vx*Math.cos(player.angle)+player.vy*Math.sin(player.angle)>0){
+    ctx.fillStyle='rgba(0,255,0,0.3)';
+    ctx.fill();
+  }
+  
+  ctx.restore();
+  
+  // Draw particles (explosions)
+  particles.forEach(p=>{
+    ctx.strokeStyle=p.color;
+    ctx.lineWidth=2;
+    ctx.shadowColor=p.color;
+    ctx.shadowBlur=8;
+    ctx.globalAlpha=p.life/50;
+    
+    ctx.beginPath();
+    ctx.arc(p.x,p.y,p.size*(p.life/50),0,Math.PI*2);
+    ctx.stroke();
+    
+    ctx.globalAlpha=1;
+  });
+  
+  // Ring regeneration effect
+  if(ringRegenerating){
+    ctx.strokeStyle='#0ff';
+    ctx.lineWidth=3;
+    ctx.shadowColor='#0ff';
+    ctx.shadowBlur=20;
+    
+    const progress=1-(regenTimer/120);
+    ctx.beginPath();
+    ctx.arc(cannon.x,cannon.y,50+progress*100,0,Math.PI*2*progress);
+    ctx.stroke();
+  }
   
   if(state==='gameover'){
     ctx.fillStyle='rgba(0,0,0,0.7)';
     ctx.fillRect(0,0,W,H);
+    
     ctx.fillStyle='#f00';
-    ctx.font='48px monospace';
+    ctx.font='bold 64px monospace';
     ctx.textAlign='center';
-    ctx.fillText('GAME OVER',W/2,H/2);
+    ctx.shadowColor='#f00';
+    ctx.shadowBlur=20;
+    ctx.fillText('GAME OVER',W/2,H/2-50);
+    
     ctx.fillStyle='#fff';
+    ctx.font='32px monospace';
+    ctx.shadowBlur=0;
+    ctx.fillText('SCORE: '+score,W/2,H/2+10);
+    
     ctx.font='24px monospace';
-    ctx.fillText('Tap to restart',W/2,H/2+50);
+    ctx.fillText('Tap to restart',W/2,H/2+60);
   }
 }
 
@@ -269,49 +512,105 @@ function loop(){
   requestAnimationFrame(loop);
 }
 
-// Input handling - declared before use
-window.addEventListener('keydown',e=>{keys[e.key]=true;});
+// Input handling - keyboard
+window.addEventListener('keydown',e=>{
+  keys[e.key]=true;
+  if(e.key===' '&&state==='playing'){
+    shoot();
+  }
+});
 window.addEventListener('keyup',e=>{keys[e.key]=false;});
 
 // Touch controls for mobile
 let touchStartX=0,touchStartY=0;
 canvas.addEventListener('touchstart',e=>{
   e.preventDefault();
-  if(state==='ready'||state==='gameover'){
+  if(state==='attract'||state==='ready'){
+    startGame();
+    return;
+  }
+  if(state==='gameover'){
     restartGame();
     return;
   }
+  
   touchStartX=e.touches[0].clientX;
   touchStartY=e.touches[0].clientY;
+  
+  // Determine which side of screen was touched
+  if(touchStartX<W/2){
+    touchInput.left=true;
+  }else{
+    touchInput.right=true;
+  }
+  
+  // Tap to fire/thrust
+  touchInput.fire=true;
 },{passive:false});
 
 canvas.addEventListener('touchmove',e=>{
   e.preventDefault();
   if(state!=='playing')return;
+  
   const touchX=e.touches[0].clientX;
-  player.x=touchX;
+  const touchY=e.touches[0].clientY;
+  
+  // Update thrust based on touch position relative to start
+  if(touchStartX<W/2){
+    // Left side: rotation only
+    touchInput.left=true;
+    touchInput.right=false;
+  }else{
+    // Right side: thrust only
+    touchInput.left=false;
+    touchInput.right=true;
+  }
 },{passive:false});
 
 canvas.addEventListener('touchend',e=>{
   e.preventDefault();
-  if(state==='playing'){
+  if(state!=='playing')return;
+  
+  // Fire on release
+  if(touchInput.fire){
     shoot();
   }
+  
+  touchInput.left=false;
+  touchInput.right=false;
+  touchInput.fire=false;
+  touchInput.thrust=false;
 },{passive:false});
 
-// Start/restart button
-function restartGame(){
+// Start/restart game
+function startGame(){
   state='playing';
-  score=0;lives=3;
+  score=0;lives=3;level=1;
   player.x=W/2;player.y=H-100;
-  mines=[];bullets=[];cannonBullets=[];
+  player.vx=0;player.vy=0;player.angle=-Math.PI/2;
+  mines=[];bullets=[];cannonBullets=[];particles=[];
+  cannon.health=10;cannon.firing=false;
+  ringRegenerating=false;
   initRings();
+  initMines();
   document.getElementById('startBtn').style.display='none';
 }
 
+function restartGame(){
+  startGame();
+}
+
 document.getElementById('startBtn').addEventListener('click',()=>{
-  restartGame();
+  if(state==='attract'||state==='ready'){
+    startGame();
+  }else{
+    restartGame();
+  }
 });
+
+// Initialize game
+player.x=W/2;
+player.y=H-100;
 
 // Start loop
 loop();
