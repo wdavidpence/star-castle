@@ -32,7 +32,19 @@ canvas#game{
   -webkit-touch-callout:none;
   bottom:calc(18px + env(safe-area-inset-bottom,0px));
 }
-.btn:active{background:rgba(80,140,255,.38);border-color:#9cf}
+.start-btn:active{background:rgba(80,140,255,.6);border-color:#fff}
+.start-instruction{
+  position:fixed;z-index:10;box-sizing:border-box;
+  padding:24px 32px;border:2px solid rgba(160,200,255,.8);border-radius:12px;
+  background:rgba(20,40,80,.6);color:#fff;font-weight:bold;font-size:18px;
+  font-family:"Courier New",monospace;text-transform:uppercase;letter-spacing:2px;
+  cursor:pointer;display:flex;align-items:center;justify-content:center;
+  touch-action:manipulation;-webkit-tap-highlight-color:transparent;user-select:none;
+  -webkit-user-select:none;text-shadow:0 0 10px rgba(160,200,255,.8);
+  box-shadow:0 0 20px rgba(160,200,255,.4);
+  bottom:calc(30% + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);
+}
+.start-instruction:active{background:rgba(80,140,255,.6);border-color:#fff}
 .left{left:calc(16px + env(safe-area-inset-left,0px))}
 .right{left:calc(100px + env(safe-area-inset-left,0px))}
 .fire{right:calc(16px + env(safe-area-inset-right,0px))}
@@ -49,6 +61,8 @@ canvas#game{
 <div class="btn right" data-key="right" aria-label="rotate right">⟳</div>
 <div class="btn thrust" data-key="thrust" aria-label="thrust">▲</div>
 <div class="btn fire" data-key="fire" aria-label="fire">●</div>
+
+<div class="start-instruction" id="startInstruction">TAP TO START</div>
 <script>
 (()=>{
 'use strict';
@@ -470,8 +484,27 @@ function draw(){
 }
 
 // Start/restart on tap/click
-canvas.addEventListener('touchstart',()=>{if(state==='ready'||state==='gameover'){initLevel();state='playing';}},{passive:true});
-canvas.addEventListener('mousedown',()=>{if(state==='ready'||state==='gameover'){initLevel();state='playing';}});
+document.getElementById('startInstruction').addEventListener('click',()=>{
+  if(state==='ready'||state==='gameover'){initLevel();state='playing';}
+});
+document.getElementById('startInstruction').addEventListener('touchend',e=>{
+  e.preventDefault();
+  if(state==='ready'||state==='gameover'){initLevel();state='playing';}
+},{passive:false});
+
+canvas.addEventListener('touchstart',()=>{
+  if(state==='ready'||state==='gameover'){initLevel();state='playing';}
+},{passive:true});
+canvas.addEventListener('mousedown',()=>{
+  if(state==='ready'||state==='gameover'){initLevel();state='playing';}
+});
+
+// Hide start instruction when game starts
+const origInitLevel = initLevel;
+initLevel = function(){
+  document.getElementById('startInstruction').style.display='none';
+  origInitLevel();
+};
 
 function loop(){update();draw();requestAnimationFrame(loop);}
 initLevel();state='ready';loop();
